@@ -1,0 +1,18 @@
+[project]
+name = "aws-customer-intel-orchestrator"
+version = "0.1.0"
+description = "Strands-based multi-agent workflow for AWS customer intelligence."
+requires-python = ">=3.10"
+
+dependencies = [
+  "strands-agents",
+  "httpx",
+  "pydantic",
+  "strand>=0.1.8",
+]
+
+[project.scripts]
+aws-intel-run = "orchestrator.run:main"
+
+[tool.uv]
+package = false

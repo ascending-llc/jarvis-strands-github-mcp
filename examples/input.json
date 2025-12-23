@@ -1,0 +1,7 @@
+{
+  "target_domain": "example.com",
+  "company_name_hint": "Example Company",
+  "research_priority": "standard",
+  "special_focus": ["security", "cost optimization"],
+  "time_limit": "3h"
+}
