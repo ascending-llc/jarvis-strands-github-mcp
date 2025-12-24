@@ -1,0 +1,8 @@
+reports/
+__pycache__/
+.venv/
+*.log
+.env
+*.egg-info/
+.claude
+.vscode/

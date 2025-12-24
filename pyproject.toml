@@ -9,10 +9,22 @@ dependencies = [
   "httpx",
   "pydantic",
   "strand>=0.1.8",
+  "fastapi>=0.127.0",
+  "python-dotenv",
+  "tavily-python>=0.7.0",
+  "jinja2>=3.1.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["orchestrator*"]
+exclude = ["prompts", "reports"]
 
 [project.scripts]
 aws-intel-run = "orchestrator.run:main"
 
 [tool.uv]
-package = false
+package = true
