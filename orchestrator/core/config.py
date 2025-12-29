@@ -30,6 +30,9 @@ class AppConfig:
     model: str
     perplexity_model: str
     report_output_dir: str
+    aws_region: str
+    s3_bucket: Optional[str]
+    s3_prefix: str
     max_tokens: int
     bedrock_read_timeout: int
     bedrock_connect_timeout: int
@@ -76,6 +79,9 @@ def load_config() -> AppConfig:
             model=os.getenv("MODEL"),
             perplexity_model=os.getenv("PERPLEXITY_MODEL", "sonar"),
             report_output_dir=os.getenv("REPORT_OUTPUT_DIR", "reports"),
+            aws_region=os.getenv("AWS_REGION", "us-east-1"),
+            s3_bucket=os.getenv("S3_BUCKET"),
+            s3_prefix=os.getenv("S3_PREFIX", "aws-intel-reports"),
             max_tokens=int(os.getenv("MAX_TOKENS", "8192")),
             bedrock_read_timeout=int(os.getenv("BEDROCK_READ_TIMEOUT", "300")),
             bedrock_connect_timeout=int(os.getenv("BEDROCK_CONNECT_TIMEOUT", "30")),

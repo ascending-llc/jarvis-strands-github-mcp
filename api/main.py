@@ -1,13 +1,16 @@
 """FastAPI app and CLI entry for running the research graph."""
 
 import json
+import os
 import sys
 from typing import Any, Dict
 
+import boto3
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
+from orchestrator.core.config import load_config
 from orchestrator.core.exceptions import AgentError, OrchestratorException
 from orchestrator.core.logging_config import get_logger, setup_logging
 from orchestrator.graph import run_research_graph
@@ -26,9 +29,30 @@ def health() -> Dict[str, str]:
 
 
 @app.post("/research")
-def research(request: ResearchRequest) -> Dict[str, Any]:
+def research(
+    request: ResearchRequest,
+) -> Dict[str, Any]:
     try:
-        return run_research_graph({"user_input": request.prompt})
+        result = run_research_graph({"user_input": request.prompt})
+        config = load_config()
+        html_path = result.get("html_report_path")
+        if not html_path:
+            raise HTTPException(status_code=500, detail="HTML report was not generated")
+        if not config.s3_bucket:
+            raise HTTPException(status_code=500, detail="S3_BUCKET is not configured")
+        key_prefix = config.s3_prefix.strip("/")
+        filename = os.path.basename(html_path)
+        s3_key = f"{key_prefix}/{filename}" if key_prefix else filename
+        s3_client = boto3.client("s3", region_name=config.aws_region)
+        s3_client.upload_file(
+            html_path,
+            config.s3_bucket,
+            s3_key,
+            ExtraArgs={"ContentType": "text/html"},
+        )
+        region = config.aws_region
+        public_url = f"https://{config.s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+        return {"report_url": public_url}
     except AgentError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

@@ -48,6 +48,7 @@ name = "aws-customer-intel-orchestrator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "boto3" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
@@ -61,6 +62,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3" },
     { name = "fastapi", specifier = ">=0.127.0" },
     { name = "httpx" },
     { name = "jinja2", specifier = ">=3.1.0" },
