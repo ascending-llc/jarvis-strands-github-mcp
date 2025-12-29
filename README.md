@@ -37,6 +37,7 @@ Dispatcher (Domain Verification)
 ✅ **Token Efficient** - Separates data generation from presentation (30-40% token savings)
 ✅ **Fully Typed** - Type-safe with Pydantic models and proper error handling
 ✅ **Production Ready** - Structured logging, config validation, comprehensive error handling
+✅ **API + CLI** - FastAPI endpoint and CLI entrypoint for local runs
 
 ---
 
@@ -74,10 +75,11 @@ TAVILY_API_KEY=your_tavily_key
 # AWS Credentials (for Bedrock)
 AWS_ACCESS_KEY_ID=your_aws_key
 AWS_SECRET_ACCESS_KEY=your_aws_secret
-AWS_DEFAULT_REGION=us-east-1
+AWS_REGION=us-east-1
 
 # Optional Settings (with defaults)
-MODEL=anthropic.claude-sonnet-4-v1
+MODEL=your_bedrock_inference_profile_arn
+PERPLEXITY_MODEL=sonar
 REPORT_OUTPUT_DIR=reports
 MAX_TOKENS=8192
 BEDROCK_READ_TIMEOUT=300
@@ -93,7 +95,10 @@ ORCHESTRATOR_LOG_LEVEL=INFO
 uv run aws-intel-run "Research AWS opportunities for stripe.com"
 
 # Or with python module syntax
-PYTHONPATH=. python -m orchestrator.run "Analyze business challenges for example.com"
+PYTHONPATH=. python -m api.main "Analyze business challenges for example.com"
+
+# Run the API server
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 ---
@@ -101,6 +106,8 @@ PYTHONPATH=. python -m orchestrator.run "Analyze business challenges for example
 ## Project Structure
 
 ```
+api/
+└── main.py                   # FastAPI app + CLI entrypoint
 orchestrator/
 ├── agents/                    # Agent implementations
 │   ├── __init__.py
@@ -121,7 +128,6 @@ orchestrator/
 ├── graph.py                   # Graph orchestration logic
 ├── utils.py                   # Utilities (JSON, prompts, reports)
 ├── schemas.py                 # Pydantic data models
-└── run.py                     # CLI entry point
 
 prompts/                       # Agent system prompts
 ├── dispatcher_agent.md
@@ -194,25 +200,13 @@ The orchestrator uses a **4-node parallel graph pattern** powered by Strands Age
                  └────────┬─────────┘
                           │
                           ▼
-                ┌──────────────────┐
-                │  JINJA2 TEMPLATE │ (Report Generation)
-                │                  │
-                │ • Renders JSON   │
-                │   to HTML        │
-                │ • AWS-branded    │
-                │   styling        │
-                │ • Professional   │
-                │   layout         │
-                └────────┬─────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │  HTML REPORT SAVED  │
-              │                     │
-              │ reports/Company_    │
-              │ Name_2025-12-24_    │
-              │ 15-30-00.html       │
-              └─────────────────────┘
+                ┌─────────────────────┐
+                │  HTML REPORT SAVED  │
+                │                     │
+                │ reports/Company_    │
+                │ Name_2025-12-24_    │
+                │ 15-30-00.html       │
+                └─────────────────────┘
 ```
 
 ### Data Flow Details
@@ -275,8 +269,9 @@ The orchestrator uses a **4-node parallel graph pattern** powered by Strands Age
 | `TAVILY_API_KEY` | ✅ | - | Tavily API key |
 | `AWS_ACCESS_KEY_ID` | ✅ | - | AWS access key for Bedrock |
 | `AWS_SECRET_ACCESS_KEY` | ✅ | - | AWS secret key |
-| `AWS_DEFAULT_REGION` | ❌ | us-east-1 | AWS region |
-| `MODEL` | ❌ | sonnet | Bedrock model ID or inference profile |
+| `AWS_REGION` | ❌ | us-east-1 | AWS region |
+| `MODEL` | ❌ | sonar | Bedrock model ID or inference profile |
+| `PERPLEXITY_MODEL` | ❌ | sonar | Perplexity model name |
 | `REPORT_OUTPUT_DIR` | ❌ | reports | Output directory for HTML reports |
 | `MAX_TOKENS` | ❌ | 8192 | Maximum tokens per agent |
 | `ORCHESTRATOR_LOG_LEVEL` | ❌ | INFO | Logging level (DEBUG/INFO/WARNING) |
@@ -333,6 +328,7 @@ Professional AWS-branded report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-
 
 Core dependencies:
 - `strands-agents` - Multi-agent orchestration
+- `fastapi` + `uvicorn` - API server
 - `jinja2` - HTML template rendering
 - `tavily-python` - Tavily API client
 - `httpx` - HTTP client

@@ -73,7 +73,7 @@ def load_config() -> AppConfig:
             perplexity_api_key=_validate_required_env(
                 "PERPLEXITY_API_KEY", "Perplexity API authentication key"
             ),
-            model=os.getenv("MODEL", os.getenv("PERPLEXITY_MODEL", "sonar")),
+            model=os.getenv("MODEL"),
             perplexity_model=os.getenv("PERPLEXITY_MODEL", "sonar"),
             report_output_dir=os.getenv("REPORT_OUTPUT_DIR", "reports"),
             max_tokens=int(os.getenv("MAX_TOKENS", "8192")),

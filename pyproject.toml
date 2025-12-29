@@ -10,6 +10,7 @@ dependencies = [
   "pydantic",
   "strand>=0.1.8",
   "fastapi>=0.127.0",
+  "uvicorn>=0.30.0",
   "python-dotenv",
   "tavily-python>=0.7.0",
   "jinja2>=3.1.0",
@@ -20,11 +21,11 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["orchestrator*"]
+include = ["orchestrator*", "api*"]
 exclude = ["prompts", "reports"]
 
 [project.scripts]
-aws-intel-run = "orchestrator.run:main"
+aws-intel-run = "api.main:main"
 
 [tool.uv]
 package = true

@@ -18,7 +18,15 @@ from strands.multiagent.graph import GraphState
 from orchestrator.core.config import load_config
 from orchestrator.core.exceptions import AgentError
 from orchestrator.core.logging_config import get_logger
-from orchestrator.utils import ensure_dir, extract_json_from_text, utc_timestamp, render_report
+from orchestrator.utils import (
+    ensure_dir,
+    extract_json_from_text,
+    extract_node_json,
+    format_task,
+    render_report,
+    save_report,
+    utc_timestamp,
+)
 from orchestrator.agents.dispatcher_agent import create_dispatcher_agent
 from orchestrator.agents.tavily_agent import create_tavily_agent
 from orchestrator.agents.perplexity_agent import create_perplexity_agent
@@ -60,77 +68,6 @@ def build_research_graph() -> Any:
     return builder.build()
 
 
-def _extract_node_json(graph_result: Any, node_id: str) -> Dict[str, Any]:
-    """Extract JSON from a node's result in the graph.
-
-    Handles Strands agent response format where content is in:
-    {'role': 'assistant', 'content': [{'text': '...'}]}
-    """
-    node_result = graph_result.results.get(node_id) if graph_result and graph_result.results else None
-    if not node_result:
-        return {}
-
-    agent_result = getattr(node_result, "result", None)
-    message = getattr(agent_result, "message", None)
-    text = str(message) if message is not None else str(agent_result)
-
-    # Try to extract content from Strands agent response format
-    # Format: {'role': 'assistant', 'content': [{'text': 'actual content'}]}
-    try:
-        # Attempt to eval the string as a Python dict
-        import ast
-        response_dict = ast.literal_eval(text)
-
-        # Extract text from content array
-        if isinstance(response_dict, dict) and 'content' in response_dict:
-            content = response_dict['content']
-            if isinstance(content, list) and len(content) > 0:
-                if isinstance(content[0], dict) and 'text' in content[0]:
-                    text = content[0]['text']
-    except (ValueError, SyntaxError, KeyError, IndexError):
-        # If parsing fails, use the original text
-        pass
-
-    parsed = extract_json_from_text(text)
-    return parsed or {}
-
-
-def _format_task(task: Dict[str, Any]) -> str:
-    if task.get("user_input"):
-        return task["user_input"]
-    lines = []
-    for key, value in task.items():
-        lines.append(f"{key}: {value}")
-    return "\n".join(lines)
-
-
-def _render_html_report(aggregator_result: Dict[str, Any]) -> str:
-    """Render HTML report from aggregator JSON data using Jinja2 template.
-
-    Args:
-        aggregator_result: JSON data from aggregator agent
-
-    Returns:
-        Rendered HTML string, or empty string if rendering fails
-    """
-    try:
-        if not aggregator_result:
-            logger.warning("Aggregator result is empty, cannot render HTML")
-            return ""
-
-        # Render HTML using Jinja2 template
-        html = render_report(aggregator_result)
-        logger.info("HTML report rendered successfully (%d chars)", len(html))
-        return html
-
-    except ValueError as e:
-        logger.error("HTML rendering failed due to missing data: %s", e)
-        return ""
-    except Exception as e:
-        logger.error("HTML rendering failed: %s", e, exc_info=True)
-        return ""
-
-
 def run_research_graph(task: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the research graph on a given task."""
     logger.info("Starting research graph execution")
@@ -157,15 +94,15 @@ def run_research_graph(task: Dict[str, Any]) -> Dict[str, Any]:
             execution_order = ["aggregator"]
         else:
             graph = build_research_graph()
-            task_text = _format_task(task)
+            task_text = format_task(task)
 
             logger.info("Executing compiled research graph")
             result = graph(task_text)
 
-            dispatcher_result = _extract_node_json(result, "dispatcher")
-            tavily_result = _extract_node_json(result, "tavily")
-            perplexity_result = _extract_node_json(result, "perplexity")
-            aggregator_result = _extract_node_json(result, "aggregator")
+            dispatcher_result = extract_node_json(result, "dispatcher")
+            tavily_result = extract_node_json(result, "tavily")
+            perplexity_result = extract_node_json(result, "perplexity")
+            aggregator_result = extract_node_json(result, "aggregator")
             logger.info(
                 "Aggregator keys: %s",
                 sorted(aggregator_result.keys()) if isinstance(aggregator_result, dict) else type(aggregator_result),
@@ -174,7 +111,17 @@ def run_research_graph(task: Dict[str, Any]) -> Dict[str, Any]:
             execution_order = [node.node_id for node in result.execution_order]
 
         html_path = None
-        html_report = _render_html_report(aggregator_result)
+        html_report = ""
+        try:
+            if not aggregator_result:
+                logger.warning("Aggregator result is empty, cannot render HTML")
+            else:
+                html_report = render_report(aggregator_result)
+        except ValueError as e:
+            logger.error("HTML rendering failed due to missing data: %s", e)
+        except Exception as e:
+            logger.error("HTML rendering failed: %s", e, exc_info=True)
+
         if html_report:
             config = load_config()
             ensure_dir(config.report_output_dir)
@@ -182,9 +129,7 @@ def run_research_graph(task: Dict[str, Any]) -> Dict[str, Any]:
             safe_company = str(company).replace(" ", "_").replace("/", "_")
             timestamp = utc_timestamp().replace(" ", "_").replace(":", "-")
             html_path = f"{config.report_output_dir}/{safe_company}_{timestamp}.html"
-            with open(html_path, "w", encoding="utf-8") as handle:
-                handle.write(html_report)
-            logger.info("HTML report written to %s", html_path)
+            html_path = save_report(html_report, html_path)
 
         logger.info("Research graph execution completed successfully")
         return {

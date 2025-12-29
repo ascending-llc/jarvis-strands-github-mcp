@@ -159,3 +159,43 @@ def save_report(html: str, output_path: str) -> str:
 
     logger.info("HTML report saved to: %s", output_path)
     return output_path
+
+
+def extract_node_json(graph_result: Any, node_id: str) -> Dict[str, Any]:
+    """Extract JSON from a node's result in the graph.
+
+    Handles Strands agent response format where content is in:
+    {'role': 'assistant', 'content': [{'text': '...'}]}
+    """
+    node_result = graph_result.results.get(node_id) if graph_result and graph_result.results else None
+    if not node_result:
+        return {}
+
+    agent_result = getattr(node_result, "result", None)
+    message = getattr(agent_result, "message", None)
+    text = str(message) if message is not None else str(agent_result)
+
+    try:
+        import ast
+
+        response_dict = ast.literal_eval(text)
+        if isinstance(response_dict, dict) and "content" in response_dict:
+            content = response_dict["content"]
+            if isinstance(content, list) and len(content) > 0:
+                if isinstance(content[0], dict) and "text" in content[0]:
+                    text = content[0]["text"]
+    except (ValueError, SyntaxError, KeyError, IndexError):
+        pass
+
+    parsed = extract_json_from_text(text)
+    return parsed or {}
+
+
+def format_task(task: Dict[str, Any]) -> str:
+    """Format a task payload into a single string for the graph."""
+    if task.get("user_input"):
+        return task["user_input"]
+    lines = []
+    for key, value in task.items():
+        lines.append(f"{key}: {value}")
+    return "\n".join(lines)
