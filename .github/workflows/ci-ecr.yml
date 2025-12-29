@@ -1,0 +1,62 @@
+name: Build and Push to ECR
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: "AWS Region"
+        type: string
+        required: true
+        default: "us-east-1"
+      ecr_repository:
+        description: "ECR repository (e.g. jarvis/aws-intel)"
+        type: string
+        required: true
+        default: "jarvis/aws-intel"
+      image_name:
+        description: "Image name tag prefix"
+        type: string
+        required: true
+        default: "aws-intel"
+      dockerfile:
+        description: "Dockerfile path"
+        type: string
+        required: true
+        default: "Dockerfile"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_push:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: github-actions-ecr
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ inputs.image_name }}-${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ inputs.image_name }}-latest
+          provenance: false

@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import uvicorn
 
 from orchestrator.core.exceptions import AgentError, OrchestratorException
 from orchestrator.core.logging_config import get_logger, setup_logging
@@ -79,6 +80,12 @@ def main() -> None:
         logger.error(error_msg, exc_info=True)
         print(json.dumps({"status": "error", "error": str(e), "error_type": type(e).__name__}, indent=2), file=sys.stderr)
         sys.exit(4)
+
+
+def run_server() -> None:
+    """Run the FastAPI server."""
+    setup_logging()
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
