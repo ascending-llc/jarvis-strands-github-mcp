@@ -9,16 +9,20 @@ from typing import Any, Dict, Optional
 
 from jinja2 import Environment, FileSystemLoader
 
-from orchestrator.core.logging_config import get_logger
+from agents.shared.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 # Template directory for HTML reports
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+PROMPT_DIR = Path(__file__).parent / "prompts"
 
 
 def load_prompt(path: str) -> str:
-    with open(path, "r", encoding="utf-8") as handle:
+    prompt_path = Path(path)
+    if not prompt_path.is_absolute():
+        prompt_path = PROMPT_DIR / path
+    with open(prompt_path, "r", encoding="utf-8") as handle:
         return handle.read()
 
 

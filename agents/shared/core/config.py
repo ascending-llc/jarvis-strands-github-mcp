@@ -4,8 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from orchestrator.core.exceptions import ConfigurationError
-from orchestrator.core.logging_config import get_logger
+from agents.shared.core.exceptions import ConfigurationError
+from agents.shared.core.logging_config import get_logger
 from dotenv import load_dotenv
 
 logger = get_logger(__name__)

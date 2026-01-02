@@ -1,6 +1,6 @@
 # AWS Customer Intelligence Orchestrator
 
-Multi-agent research system that coordinates specialized agents to produce comprehensive customer intelligence reports. Built with [Strands Agents SDK](https://strandsagents.com) using a parallel graph workflow.
+Multi-agent research system that coordinates specialized agents to produce comprehensive customer intelligence reports. Built with [Strands Agents SDK](https://strandsagents.com) and exposed through an A2A gateway for agent-to-agent collaboration.
 
 ## Overview
 
@@ -10,29 +10,27 @@ Multi-agent research system that coordinates specialized agents to produce compr
 ### Architecture
 
 ```
-Dispatcher (Domain Verification)
+Deep Intel (Unified)
         ↓
-    ┌───┴───┐
-    ↓       ↓
- Tavily  Perplexity (Parallel Research)
-    ↓       ↓
-    └───┬───┘
-        ↓
-   Aggregator (Synthesis)
+   ┌────┴─────┐
+   ↓          ↓
+AWS Research  Business Intel (A2A Calls)
+   ↓          ↓
+   └────┬─────┘
         ↓
    HTML Report (Jinja2)
 ```
 
-### Four Specialized Agents
+### A2A Agents
 
-1. **Dispatcher** - Verifies domain and prepares research context
-2. **Perplexity Agent** - Business intelligence (company profile, market position, tech stack, leadership)
-3. **Tavily Agent** - AWS-focused research (case studies, cloud solutions, opportunities)
-4. **Aggregator** - Synthesizes findings and generates structured data for reporting
+1. **Deep Intel Agent** - Coordinates A2A calls and synthesizes the final report
+2. **AWS Research Agent** - AWS-focused research (case studies, cloud solutions, opportunities)
+3. **Business Intel Agent** - Company profile, market position, tech stack, leadership
 
 ### Key Features
 
-✅ **Parallel Execution** - Tavily and Perplexity run simultaneously for speed
+✅ **A2A Gateway** - Multiple agents registered under distinct endpoints
+✅ **Parallel Execution** - AWS Research and Business Intel run simultaneously
 ✅ **Elegant HTML Reports** - Professional AWS-branded reports via Jinja2 templates
 ✅ **Token Efficient** - Separates data generation from presentation (30-40% token savings)
 ✅ **Fully Typed** - Type-safe with Pydantic models and proper error handling
@@ -81,6 +79,7 @@ AWS_REGION=us-east-1
 MODEL=your_bedrock_inference_profile_arn
 PERPLEXITY_MODEL=sonar
 REPORT_OUTPUT_DIR=reports
+A2A_BASE_URL=http://localhost:8000
 MAX_TOKENS=8192
 BEDROCK_READ_TIMEOUT=300
 BEDROCK_CONNECT_TIMEOUT=30
@@ -101,39 +100,60 @@ PYTHONPATH=. python -m api.main "Analyze business challenges for example.com"
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
+Note: the CLI uses the A2A gateway to call other agents. Ensure the API server is running and `A2A_BASE_URL` points to it.
+
+REST endpoints:
+- `POST /research` (alias for deep intel)
+- `POST /research/deep-intel`
+- `POST /research/aws`
+- `POST /research/business`
+
+## A2A Protocol Support
+
+This service implements the A2A HTTP+JSON binding for multiple agents:
+
+- `GET /agents/deep-intel/.well-known/agent-card.json`
+- `GET /agents/aws-research/.well-known/agent-card.json`
+- `GET /agents/business-intel/.well-known/agent-card.json`
+
+Each agent exposes:
+
+- `POST /v1/message:send`
+- `POST /v1/message:stream` (SSE)
+- `GET /v1/tasks/{id}`
+- `POST /v1/tasks/{id}:cancel`
+- `GET /v1/tasks/{id}:subscribe` (SSE)
+
+Set `A2A_BASE_URL` so agents can call each other through the gateway (defaults to `http://localhost:8000`).
+
 ---
 
 ## Project Structure
 
 ```
 api/
+├── app.py                    # FastAPI app factory + A2A gateway mounting
 └── main.py                   # FastAPI app + CLI entrypoint
-orchestrator/
-├── agents/                    # Agent implementations
-│   ├── __init__.py
-│   ├── dispatcher_agent.py    # Domain verification
-│   ├── perplexity_agent.py    # Business intelligence
-│   ├── tavily_agent.py        # AWS-focused research
-│   └── aggregator_agent.py    # Synthesis & recommendations
-├── core/                      # Core infrastructure
-│   ├── __init__.py
-│   ├── config.py              # Configuration & validation
-│   ├── exceptions.py          # Custom exception types
-│   ├── logging_config.py      # Structured logging
-│   └── context.py             # Execution context
-├── tools/                     # Tool implementations
-│   └── strands_tools.py       # Tavily API wrappers
-├── templates/                 # HTML templates
-│   └── report.html            # AWS-branded report template
-├── graph.py                   # Graph orchestration logic
-├── utils.py                   # Utilities (JSON, prompts, reports)
-├── schemas.py                 # Pydantic data models
-
-prompts/                       # Agent system prompts
-├── dispatcher_agent.md
-├── perplexity_agent.md
-├── tavily_agent.md
-└── aggregator_agent.md
+agents/
+├── agent_cards.py             # AgentCard builders
+├── clients.py                 # Agent-to-agent client helpers
+├── gateway.py                 # A2A FastAPI sub-apps
+├── registry.py                # Agent registry + URLs
+├── reporting.py               # Report rendering + upload
+├── aws_research/              # AWS Research agent
+│   ├── executor.py
+│   └── research_agent.py
+├── business_intel/            # Business Intel agent
+│   ├── executor.py
+│   └── research_agent.py
+├── deep_intel/                # Deep Intel agent
+│   └── executor.py
+└── shared/                    # Shared helpers
+    ├── base_executor.py
+    ├── core/                  # Config + logging + exceptions
+    ├── prompts/               # Agent system prompts
+    ├── templates/             # HTML template
+    └── tools/                 # Tavily tool wrappers
 
 reports/                       # Generated HTML reports (auto-created)
 logs/                          # Application logs (auto-created)
@@ -145,7 +165,8 @@ logs/                          # Application logs (auto-created)
 
 ### Workflow Overview
 
-The orchestrator uses a **4-node parallel graph pattern** powered by Strands Agents SDK:
+The system uses an **A2A gateway** with a Deep Intel agent that calls two
+specialized agents in parallel:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -156,21 +177,19 @@ The orchestrator uses a **4-node parallel graph pattern** powered by Strands Age
                              │
                              ▼
                    ┌─────────────────┐
-                   │   DISPATCHER    │ (Domain Verification)
+                   │   DEEP INTEL    │ (Unified)
                    │                 │
-                   │ • Validates     │
-                   │   domain        │
-                   │ • Extracts      │
-                   │   company info  │
-                   │ • Classifies    │
-                   │   industry      │
+                   │ • Calls A2A     │
+                   │   agents        │
+                   │ • Synthesizes   │
+                   │   findings      │
                    └────────┬────────┘
                             │
               ┌─────────────┴─────────────┐
               │                           │
               ▼                           ▼
     ┌──────────────────┐       ┌──────────────────┐
-    │  TAVILY AGENT    │       │ PERPLEXITY AGENT │ (Parallel)
+    │ AWS RESEARCH     │       │ BUSINESS INTEL   │ (Parallel)
     │                  │       │                  │
     │ • AWS case       │       │ • Company        │
     │   studies        │       │   profile        │
@@ -185,21 +204,6 @@ The orchestrator uses a **4-node parallel graph pattern** powered by Strands Age
              └─────────────┬─────────────┘
                            │
                            ▼
-                 ┌──────────────────┐
-                 │   AGGREGATOR     │ (Synthesis)
-                 │                  │
-                 │ • Combines       │
-                 │   findings       │
-                 │ • Maps AWS       │
-                 │   opportunities  │
-                 │ • Creates        │
-                 │   strategic      │
-                 │   recommendations│
-                 │ • Generates      │
-                 │   JSON data      │
-                 └────────┬─────────┘
-                          │
-                          ▼
                 ┌─────────────────────┐
                 │  HTML REPORT SAVED  │
                 │                     │
@@ -211,51 +215,31 @@ The orchestrator uses a **4-node parallel graph pattern** powered by Strands Age
 
 ### Data Flow Details
 
-**1. Dispatcher Agent** (Domain Verification)
-- Validates company domain accessibility
-- Extracts official company name and basic info
-- Classifies industry and business model
-- Identifies disambiguation issues
-- **Output**: JSON with verified domain context
-- **Passes to**: Both Tavily and Perplexity agents in parallel
+**1. Deep Intel Agent** (Orchestration)
+- Interprets the user prompt and sets research direction
+- **Output**: Orchestrated requests for A2A agents
 
-**2. Parallel Research Phase**
+**2. Parallel A2A Research**
 
-**Tavily Agent** (AWS Intelligence):
-- Receives dispatcher context automatically
-- Searches for AWS case studies in company's industry
-- Finds industry-specific cloud solutions
-- Identifies competitive AWS adoption patterns
-- Maps AWS services to business challenges
+**AWS Research Agent**:
+- Receives the user prompt
+- Searches for AWS case studies and cloud opportunities
 - **Output**: JSON with AWS opportunities and case studies
-- **Typical Duration**: 30-45 minutes
 
-**Perplexity Agent** (Business Intelligence):
-- Receives dispatcher context automatically
-- Researches company profile and business model
-- Analyzes market position and competitors
-- Investigates technology stack and infrastructure
-- Identifies leadership team and key personnel
-- Tracks recent developments and financial signals
-- **Output**: JSON with comprehensive business intelligence
-- **Typical Duration**: 60-90 minutes
+**Business Intel Agent**:
+- Receives the user prompt
+- Researches company profile, market position, and leadership
+- **Output**: JSON with business intelligence
 
-**3. Aggregator Agent** (Synthesis)
-- Automatically receives results from all previous agents via Strands
-- Input format: `Inputs from previous nodes: From dispatcher: ..., From tavily: ..., From perplexity: ...`
-- Combines findings from all three agents
-- Resolves conflicts and fills information gaps
-- Maps business challenges to AWS opportunities
-- Creates strategic recommendations
-- Assesses confidence levels and completeness
+**3. Deep Intel Agent** (Synthesis)
+- Collects results from A2A agents
+- Combines findings, resolves conflicts, and creates recommendations
 - **Output**: Structured JSON with synthesized intelligence
 
 **4. Report Generation** (Jinja2 Template)
-- Python code extracts JSON from aggregator
-- Jinja2 template renders JSON data to HTML
-- AWS-branded professional styling applied
+- JSON is rendered into HTML
 - Saved to `reports/` directory with timestamp
-- **Token Efficiency**: 30-40% reduction vs LLM-generated HTML
+- Optional S3 upload when configured
 
 
 
@@ -273,6 +257,7 @@ The orchestrator uses a **4-node parallel graph pattern** powered by Strands Age
 | `MODEL` | ❌ | sonar | Bedrock model ID or inference profile |
 | `PERPLEXITY_MODEL` | ❌ | sonar | Perplexity model name |
 | `REPORT_OUTPUT_DIR` | ❌ | reports | Output directory for HTML reports |
+| `A2A_BASE_URL` | ❌ | http://localhost:8000 | Base URL for A2A agent-to-agent calls |
 | `MAX_TOKENS` | ❌ | 8192 | Maximum tokens per agent |
 | `ORCHESTRATOR_LOG_LEVEL` | ❌ | INFO | Logging level (DEBUG/INFO/WARNING) |
 
@@ -303,11 +288,9 @@ Professional AWS-branded report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-
 
 ```json
 {
-  "status": "Status.COMPLETED",
-  "execution_order": ["dispatcher", "tavily", "perplexity", "aggregator"],
-  "dispatcher_verification": {...},
-  "tavily_research": {...},
-  "perplexity_research": {...},
+  "status": "completed",
+  "aws_research": {...},
+  "business_intel": {...},
   "final_synthesis": {
     "company_overview": {...},
     "business_intelligence": {...},
@@ -317,7 +300,8 @@ Professional AWS-branded report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-
     "confidence_level": "HIGH",
     "research_completeness": "Complete"
   },
-  "html_report_path": "reports/Company_Name_2025-12-24_15-30-00.html"
+  "html_report_path": "reports/Company_Name_2025-12-24_15-30-00.html",
+  "report_url": "https://bucket.s3.us-east-1.amazonaws.com/aws-intel-reports/Company_Name_2025-12-24_15-30-00.html"
 }
 ```
 
@@ -328,6 +312,7 @@ Professional AWS-branded report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-
 
 Core dependencies:
 - `strands-agents` - Multi-agent orchestration
+- `a2a-sdk` - A2A protocol gateway + client
 - `fastapi` + `uvicorn` - API server
 - `jinja2` - HTML template rendering
 - `tavily-python` - Tavily API client

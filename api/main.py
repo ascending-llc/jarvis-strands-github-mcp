@@ -1,67 +1,23 @@
-"""FastAPI app and CLI entry for running the research graph."""
+"""FastAPI app and CLI entry for running the deep intel workflow."""
 
+import asyncio
 import json
-import os
 import sys
-from typing import Any, Dict
 
-import boto3
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import uvicorn
 
-from orchestrator.core.config import load_config
-from orchestrator.core.exceptions import AgentError, OrchestratorException
-from orchestrator.core.logging_config import get_logger, setup_logging
-from orchestrator.graph import run_research_graph
+from api.app import create_app
+from agents.shared.core.exceptions import OrchestratorException
+from agents.shared.core.logging_config import get_logger, setup_logging
+from agents.deep_intel.executor import run_deep_intel
 
-app = FastAPI(title="AWS Customer Intelligence API", version="0.1.0")
+app = create_app()
 logger = get_logger(__name__)
-
-
-class ResearchRequest(BaseModel):
-    prompt: str
-
-
-@app.get("/health")
-def health() -> Dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.post("/research")
-def research(
-    request: ResearchRequest,
-) -> Dict[str, Any]:
-    try:
-        result = run_research_graph({"user_input": request.prompt})
-        config = load_config()
-        html_path = result.get("html_report_path")
-        if not html_path:
-            raise HTTPException(status_code=500, detail="HTML report was not generated")
-        if not config.s3_bucket:
-            raise HTTPException(status_code=500, detail="S3_BUCKET is not configured")
-        key_prefix = config.s3_prefix.strip("/")
-        filename = os.path.basename(html_path)
-        s3_key = f"{key_prefix}/{filename}" if key_prefix else filename
-        s3_client = boto3.client("s3", region_name=config.aws_region)
-        s3_client.upload_file(
-            html_path,
-            config.s3_bucket,
-            s3_key,
-            ExtraArgs={"ContentType": "text/html"},
-        )
-        region = config.aws_region
-        public_url = f"https://{config.s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
-        return {"report_url": public_url}
-    except AgentError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def main() -> None:
     """
-    Main CLI entry point for executing the research graph.
+    Main CLI entry point for executing the deep intel workflow.
 
     Accepts natural language input as arguments.
     Example: python -m api.main "analyze example.com" "focus on security"
@@ -70,7 +26,7 @@ def main() -> None:
         0: Success
         1: Configuration error
         2: Input validation error
-        3: Graph execution error
+        3: Workflow execution error
         4: Unexpected error
     """
     setup_logging()
@@ -86,9 +42,9 @@ def main() -> None:
     payload = {"user_input": user_input}
 
     try:
-        logger.info("Executing research graph")
-        result = run_research_graph(payload)
-        logger.info("Research graph execution completed successfully")
+        logger.info("Executing deep intel workflow")
+        result = asyncio.run(run_deep_intel(payload["user_input"]))
+        logger.info("Deep intel workflow completed successfully")
         print(json.dumps(result, indent=2))
         sys.exit(0)
     except OrchestratorException as e:
@@ -100,7 +56,7 @@ def main() -> None:
         )
         sys.exit(3)
     except Exception as e:
-        error_msg = f"Unexpected error during graph execution: {e}"
+        error_msg = f"Unexpected error during workflow execution: {e}"
         logger.error(error_msg, exc_info=True)
         print(json.dumps({"status": "error", "error": str(e), "error_type": type(e).__name__}, indent=2), file=sys.stderr)
         sys.exit(4)

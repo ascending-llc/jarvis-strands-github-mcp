@@ -11,7 +11,7 @@ on:
         description: "ECR repository (e.g. jarvis/aws-intel)"
         type: string
         required: true
-        default: "jarvis/aws-intel"
+        default: "jarvis/aws-intel-agent"
       image_name:
         description: "Image name tag prefix"
         type: string

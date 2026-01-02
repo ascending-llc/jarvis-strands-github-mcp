@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional
 from strands import tool
 from tavily import TavilyClient
 
-from orchestrator.core.config import load_config
-from orchestrator.core.exceptions import ToolError
-from orchestrator.core.logging_config import get_logger
+from agents.shared.core.config import load_config
+from agents.shared.core.exceptions import ToolError
+from agents.shared.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 config = load_config()
@@ -25,6 +25,16 @@ def _get_tavily_client() -> TavilyClient:
         _tavily_client = TavilyClient(api_key=config.tavily_api_key)
         logger.debug("Tavily client initialized")
     return _tavily_client
+
+
+def _sanitize_query(query: str) -> str:
+    tokens = query.split()
+    if not tokens:
+        return "company overview"
+    non_site_tokens = [token for token in tokens if not token.lower().startswith("site:")]
+    if not non_site_tokens:
+        return f"{query} company overview"
+    return query
 
 
 def tavily_search(
@@ -50,6 +60,7 @@ def tavily_search(
     """
     try:
         client = _get_tavily_client()
+        query = _sanitize_query(query)
         logger.debug(f"Executing Tavily search: query='{query}', max_results={max_results}")
 
         # Build search parameters
@@ -207,4 +218,3 @@ def tavily_extract_tool(url: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Unexpected error in tavily_extract_tool: {e}", exc_info=True)
         return {"ok": False, "error": f"Unexpected error: {e}"}
-
