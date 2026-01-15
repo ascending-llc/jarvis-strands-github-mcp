@@ -1,11 +1,11 @@
 # AWS Customer Intelligence Orchestrator
 
-Multi-agent research system that coordinates specialized agents to produce comprehensive customer intelligence reports. Built with [Strands Agents SDK](https://strandsagents.com) and exposed through an A2A gateway for agent-to-agent collaboration.
+Multi-agent research system that coordinates specialized agents to produce comprehensive customer intelligence reports. Built with [Strands Agents SDK](https://strandsagents.com) and exposed as standalone A2A services.
 
 ## Overview
 
 **Input:** Company domain + research prompt (e.g., `"Analyze atscale.com for AWS opportunities"`)
-**Output:** Professional HTML report + structured JSON data
+**Output:** HTML report
 
 ### Architecture
 
@@ -18,7 +18,7 @@ AWS Research  Business Intel (A2A Calls)
    ↓          ↓
    └────┬─────┘
         ↓
-   HTML Report (Jinja2)
+   HTML Report (LLM)
 ```
 
 ### A2A Agents
@@ -29,13 +29,12 @@ AWS Research  Business Intel (A2A Calls)
 
 ### Key Features
 
-✅ **A2A Gateway** - Multiple agents registered under distinct endpoints
+✅ **Standalone A2A Services** - One container per agent with A2A endpoints
 ✅ **Parallel Execution** - AWS Research and Business Intel run simultaneously
-✅ **Elegant HTML Reports** - Professional AWS-branded reports via Jinja2 templates
-✅ **Token Efficient** - Separates data generation from presentation (30-40% token savings)
+✅ **HTML Reports** - LLM-generated HTML report saved locally (and optionally to S3)
 ✅ **Fully Typed** - Type-safe with Pydantic models and proper error handling
 ✅ **Production Ready** - Structured logging, config validation, comprehensive error handling
-✅ **API + CLI** - FastAPI endpoint and CLI entrypoint for local runs
+✅ **Container Ready** - Docker Compose for local multi-agent runs
 
 ---
 
@@ -79,7 +78,6 @@ AWS_REGION=us-east-1
 MODEL=your_bedrock_inference_profile_arn
 PERPLEXITY_MODEL=sonar
 REPORT_OUTPUT_DIR=reports
-A2A_BASE_URL=http://localhost:8000
 MAX_TOKENS=8192
 BEDROCK_READ_TIMEOUT=300
 BEDROCK_CONNECT_TIMEOUT=30
@@ -87,34 +85,24 @@ BEDROCK_MAX_ATTEMPTS=3
 ORCHESTRATOR_LOG_LEVEL=INFO
 ```
 
-### Run Research
+### Run Standalone Agents (Docker Compose)
 
 ```bash
-# Using the CLI entry point (recommended)
-uv run aws-intel-run "Research AWS opportunities for stripe.com"
-
-# Or with python module syntax
-PYTHONPATH=. python -m api.main "Analyze business challenges for example.com"
-
-# Run the API server
-uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
+docker compose up --build
 ```
 
-Note: the CLI uses the A2A gateway to call other agents. Ensure the API server is running and `A2A_BASE_URL` points to it.
+Standalone agent endpoints:
+- `http://localhost:8001/v1/message:send` (deep intel)
+- `http://localhost:8002/v1/message:send` (aws research)
+- `http://localhost:8003/v1/message:send` (business intel)
 
-REST endpoints:
-- `POST /research` (alias for deep intel)
-- `POST /research/deep-intel`
-- `POST /research/aws`
-- `POST /research/business`
+Each container runs the same image and selects its agent via `AGENT_ID`.
+Deep Intel reaches the other agents via the service DNS names in `docker-compose.yml`.
 
 ## A2A Protocol Support
 
-This service implements the A2A HTTP+JSON binding for multiple agents:
-
-- `GET /agents/deep-intel/.well-known/agent-card.json`
-- `GET /agents/aws-research/.well-known/agent-card.json`
-- `GET /agents/business-intel/.well-known/agent-card.json`
+Each agent implements the A2A HTTP+JSON binding and exposes its agent card at:
+- `GET /.well-known/agent-card.json`
 
 Each agent exposes:
 
@@ -124,39 +112,36 @@ Each agent exposes:
 - `POST /v1/tasks/{id}:cancel`
 - `GET /v1/tasks/{id}:subscribe` (SSE)
 
-Set `A2A_BASE_URL` so agents can call each other through the gateway (defaults to `http://localhost:8000`).
-
 ---
 
 ## Project Structure
 
 ```
-api/
-├── app.py                    # FastAPI app factory + A2A gateway mounting
-└── main.py                   # FastAPI app + CLI entrypoint
+Dockerfile                      # Single image for all agents
+docker-compose.yml              # Three standalone agent services
 agents/
-├── agent_cards.py             # AgentCard builders
-├── clients.py                 # Agent-to-agent client helpers
-├── gateway.py                 # A2A FastAPI sub-apps
-├── registry.py                # Agent registry + URLs
-├── reporting.py               # Report rendering + upload
-├── aws_research/              # AWS Research agent
+├── agent_cards.py             # Agent card builder
+├── clients.py                 # A2A HTTP client helpers for sub-agent calls
+├── registry.py                # Agent registry + URL resolution
+├── skills.py                  # Agent skill definitions for cards
+├── aws_research/              # AWS Research agent runtime
+│   ├── executor.py            # A2A executor entrypoint
+│   └── research_agent.py      # Agent logic + prompts/tools
+├── business_intel/            # Business Intel agent runtime
 │   ├── executor.py
 │   └── research_agent.py
-├── business_intel/            # Business Intel agent
+├── deep_intel/                # Deep Intel orchestrator
 │   ├── executor.py
-│   └── research_agent.py
-├── deep_intel/                # Deep Intel agent
-│   └── executor.py
+│   └── reporting.py           # HTML report storage + optional S3 upload
+├── standalone_app.py          # Single-agent A2A service app (per container)
 └── shared/                    # Shared helpers
-    ├── base_executor.py
+    ├── base_executor.py       # A2A artifact publishing helpers
     ├── core/                  # Config + logging + exceptions
     ├── prompts/               # Agent system prompts
-    ├── templates/             # HTML template
     └── tools/                 # Tavily tool wrappers
 
-reports/                       # Generated HTML reports (auto-created)
-logs/                          # Application logs (auto-created)
+reports/                       # Generated HTML reports (bind mounted)
+logs/                          # Application logs (bind mounted)
 ```
 
 ---
@@ -165,7 +150,7 @@ logs/                          # Application logs (auto-created)
 
 ### Workflow Overview
 
-The system uses an **A2A gateway** with a Deep Intel agent that calls two
+The system uses standalone A2A services with a Deep Intel agent that calls two
 specialized agents in parallel:
 
 ```
@@ -234,10 +219,10 @@ specialized agents in parallel:
 **3. Deep Intel Agent** (Synthesis)
 - Collects results from A2A agents
 - Combines findings, resolves conflicts, and creates recommendations
-- **Output**: Structured JSON with synthesized intelligence
+- **Output**: HTML report
 
-**4. Report Generation** (Jinja2 Template)
-- JSON is rendered into HTML
+**4. Report Generation** (LLM HTML)
+- Findings are rendered into HTML by the LLM
 - Saved to `reports/` directory with timestamp
 - Optional S3 upload when configured
 
@@ -257,7 +242,11 @@ specialized agents in parallel:
 | `MODEL` | ❌ | sonar | Bedrock model ID or inference profile |
 | `PERPLEXITY_MODEL` | ❌ | sonar | Perplexity model name |
 | `REPORT_OUTPUT_DIR` | ❌ | reports | Output directory for HTML reports |
-| `A2A_BASE_URL` | ❌ | http://localhost:8000 | Base URL for A2A agent-to-agent calls |
+| `DEEP_INTEL_URL` | ❌ | - | Base URL for Deep Intel agent (standalone mode) |
+| `AWS_RESEARCH_URL` | ❌ | - | Base URL for AWS Research agent (standalone mode) |
+| `BUSINESS_INTEL_URL` | ❌ | - | Base URL for Business Intel agent (standalone mode) |
+| `AGENT_ID` | ❌ | - | Agent ID when running a standalone container |
+| `AGENT_BASE_URL` | ❌ | http://localhost:8000 | Public base URL for the running agent (agent card) |
 | `MAX_TOKENS` | ❌ | 8192 | Maximum tokens per agent |
 | `ORCHESTRATOR_LOG_LEVEL` | ❌ | INFO | Logging level (DEBUG/INFO/WARNING) |
 
@@ -273,37 +262,12 @@ specialized agents in parallel:
 
 ### HTML Report
 
-Professional AWS-branded report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-SS.html`
+LLM-generated report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-SS.html`
 
 **Sections include:**
-- Company Overview
-- Business Intelligence Summary
-- Business Challenges
-- AWS Opportunities (with case studies)
-- Industry Insights
+- Executive Summary
+- AWS Opportunities & Case Studies
 - Strategic Recommendations
-- Next Steps
-
-### JSON Response
-
-```json
-{
-  "status": "completed",
-  "aws_research": {...},
-  "business_intel": {...},
-  "final_synthesis": {
-    "company_overview": {...},
-    "business_intelligence": {...},
-    "business_challenges": [...],
-    "aws_opportunities": [...],
-    "strategic_recommendations": [...],
-    "confidence_level": "HIGH",
-    "research_completeness": "Complete"
-  },
-  "html_report_path": "reports/Company_Name_2025-12-24_15-30-00.html",
-  "report_url": "https://bucket.s3.us-east-1.amazonaws.com/aws-intel-reports/Company_Name_2025-12-24_15-30-00.html"
-}
-```
 
 ---
 
@@ -312,9 +276,9 @@ Professional AWS-branded report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-
 
 Core dependencies:
 - `strands-agents` - Multi-agent orchestration
-- `a2a-sdk` - A2A protocol gateway + client
+- `a2a-sdk` - A2A protocol server + client
 - `fastapi` + `uvicorn` - API server
-- `jinja2` - HTML template rendering
+- LLM-generated HTML reporting (no template engine)
 - `tavily-python` - Tavily API client
 - `httpx` - HTTP client
 - `pydantic` - Data validation

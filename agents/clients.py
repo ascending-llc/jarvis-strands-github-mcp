@@ -10,7 +10,7 @@ from a2a.client.client_factory import ClientFactory
 from a2a.client.helpers import create_text_message_object
 from a2a.types import Message, Part, Role, Task, TextPart, TransportProtocol
 
-from agents.registry import agent_base_url
+from agents.registry import agent_service_url
 from agents.shared.utils import extract_json_from_text
 
 
@@ -47,7 +47,7 @@ def _extract_message_payload(message: Message) -> dict[str, Any]:
 
 async def send_agent_request(agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     client_config = ClientConfig(supported_transports=[TransportProtocol.http_json])
-    client = await ClientFactory.connect(agent_base_url(agent_id), client_config=client_config)
+    client = await ClientFactory.connect(agent_service_url(agent_id), client_config=client_config)
     message = create_text_message_object(role=Role.user, content=json.dumps(payload))
     latest_task: Task | None = None
 

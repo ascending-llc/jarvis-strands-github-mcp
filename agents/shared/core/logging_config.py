@@ -22,17 +22,17 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
-    logger = logging.getLogger(name)
+    root_logger = logging.getLogger()
 
     # Only configure if not already configured
-    if logger.handlers:
-        return logger
+    if root_logger.handlers:
+        return root_logger
 
     # Determine log level
     if level is None:
         level = os.getenv("ORCHESTRATOR_LOG_LEVEL", "INFO").upper()
 
-    logger.setLevel(level)
+    root_logger.setLevel(level)
 
     # Formatter with structured information
     formatter = logging.Formatter(
@@ -44,7 +44,7 @@ def setup_logging(
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    root_logger.addHandler(console_handler)
 
     # File handler with rotation
     if log_file is None:
@@ -64,9 +64,9 @@ def setup_logging(
         )
         file_handler.setLevel(level)
         file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        root_logger.addHandler(file_handler)
 
-    return logger
+    return root_logger
 
 
 def get_logger(name: str) -> logging.Logger:

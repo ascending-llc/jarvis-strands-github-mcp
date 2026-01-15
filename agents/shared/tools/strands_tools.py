@@ -40,7 +40,7 @@ def _sanitize_query(query: str) -> str:
 def tavily_search(
     config: Any,
     query: str,
-    max_results: int = 8,
+    max_results: int = 4,
     include_domains: Optional[List[str]] = None,
     exclude_domains: Optional[List[str]] = None,
     timeframe: Optional[str] = None,
@@ -162,7 +162,7 @@ def _parse_timeframe_to_days(timeframe: str) -> int:
 @tool(name="tavily_search", description="Search the web using Tavily.")
 def tavily_search_tool(
     query: str,
-    max_results: int = 8,
+    max_results: int = 1,
     include_domains: Optional[List[str]] = None,
     exclude_domains: Optional[List[str]] = None,
     timeframe: Optional[str] = None,

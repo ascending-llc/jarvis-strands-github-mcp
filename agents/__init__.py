@@ -1,1 +1,1 @@
-"""Agent modules and A2A gateway."""
+"""Agent modules for standalone A2A services."""

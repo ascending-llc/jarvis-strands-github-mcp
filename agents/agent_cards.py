@@ -1,4 +1,4 @@
-"""Agent card builders for the A2A gateway."""
+"""Agent card builders for standalone A2A services."""
 
 from __future__ import annotations
 
@@ -23,8 +23,9 @@ def build_agent_card(
     registration: AgentRegistration,
     skills: list[AgentSkill],
     version: str = DEFAULT_AGENT_VERSION,
+    base_url: str | None = None,
 ) -> AgentCard:
-    base_url = agent_base_url(registration.agent_id)
+    base_url = (base_url or agent_base_url(registration.agent_id)).rstrip("/")
     return AgentCard(
         name=registration.name,
         description=registration.description,
