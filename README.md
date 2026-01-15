@@ -78,6 +78,8 @@ AWS_REGION=us-east-1
 MODEL=your_bedrock_inference_profile_arn
 PERPLEXITY_MODEL=sonar
 REPORT_OUTPUT_DIR=reports
+S3_BUCKET=your-s3-bucket
+S3_PREFIX=aws-intel-reports
 MAX_TOKENS=8192
 BEDROCK_READ_TIMEOUT=300
 BEDROCK_CONNECT_TIMEOUT=30
@@ -242,6 +244,8 @@ specialized agents in parallel:
 | `MODEL` | ❌ | sonar | Bedrock model ID or inference profile |
 | `PERPLEXITY_MODEL` | ❌ | sonar | Perplexity model name |
 | `REPORT_OUTPUT_DIR` | ❌ | reports | Output directory for HTML reports |
+| `S3_BUCKET` | ❌ | - | S3 bucket for report uploads |
+| `S3_PREFIX` | ❌ | aws-intel-reports | S3 prefix for report uploads |
 | `DEEP_INTEL_URL` | ❌ | - | Base URL for Deep Intel agent (standalone mode) |
 | `AWS_RESEARCH_URL` | ❌ | - | Base URL for AWS Research agent (standalone mode) |
 | `BUSINESS_INTEL_URL` | ❌ | - | Base URL for Business Intel agent (standalone mode) |
