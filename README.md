@@ -262,7 +262,7 @@ specialized agents in parallel:
 
 ### HTML Report
 
-LLM-generated report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-SS.html`
+LLM-generated report saved to `reports/Company_Name_YYYY-MM-DD_HH-MM-SS.html` and uploaded to S3 when `S3_BUCKET` is set.
 
 **Sections include:**
 - Executive Summary
