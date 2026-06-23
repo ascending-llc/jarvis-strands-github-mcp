@@ -10,6 +10,9 @@ services:
       - .env
     ports:
       - "8001:8000"
+    depends_on:
+      - aws-research
+      - business-intel
     volumes:
       - ./reports:/app/reports
       - ./logs:/app/logs
