@@ -21,7 +21,7 @@ from strands.vended_plugins.skills import AgentSkills
 
 from agents.shared.bedrock import build_bedrock_model
 from agents.shared.core.config import AppConfig
-from agents.shared.tavily_mcp import build_tavily_mcp_client
+from agents.shared.mcp import build_tavily_mcp_client
 
 
 def _system_prompt(role_line: str, schema: Type[BaseModel]) -> str:

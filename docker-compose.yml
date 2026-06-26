@@ -3,13 +3,12 @@ services:
     build: .
     environment:
       AGENT_ID: deep_intel
-      AGENT_BASE_URL: http://deep-intel:8000
-      AWS_RESEARCH_URL: http://aws-research:8000
-      BUSINESS_INTEL_URL: http://business-intel:8000
+      AWS_RESEARCH_URL: http://aws-research:9000
+      BUSINESS_INTEL_URL: http://business-intel:9000
     env_file:
       - .env
     ports:
-      - "8001:8000"
+      - "9001:9000"
     depends_on:
       - aws-research
       - business-intel
@@ -21,11 +20,10 @@ services:
     build: .
     environment:
       AGENT_ID: aws_research
-      AGENT_BASE_URL: http://aws-research:8000
     env_file:
       - .env
     ports:
-      - "8002:8000"
+      - "9002:9000"
     volumes:
       - ./logs:/app/logs
 
@@ -33,10 +31,9 @@ services:
     build: .
     environment:
       AGENT_ID: business_intel
-      AGENT_BASE_URL: http://business-intel:8000
     env_file:
       - .env
     ports:
-      - "8003:8000"
+      - "9003:9000"
     volumes:
       - ./logs:/app/logs

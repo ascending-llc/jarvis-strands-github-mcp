@@ -1,58 +1,59 @@
 """Thin A2A client for deterministic, parallel worker calls.
 
-The server side is owned by Strands' A2AServer. On the client side we keep a small
-deterministic caller so the orchestrator can fan out to workers with guaranteed
-parallelism (asyncio.gather) rather than relying on model-driven tool calls.
+The server side is owned by Strands' A2AServer / AgentCore ``serve_a2a``; the client
+side is owned by Strands' ``A2AAgent``, which wraps a remote A2A endpoint and handles
+transport negotiation, card resolution, and streaming. We keep a small helper here so
+the orchestrator can fan out to workers with guaranteed parallelism (asyncio.gather)
+rather than relying on model-driven tool calls.
+
+AUTH (deferred): calling a deployed AgentCore runtime requires a bearer token (from the
+machine OAuth client-credentials flow) plus the AgentCore session header. The plumbing
+lives in ``_auth_client_config`` below but is intentionally a no-op until the machine
+OAuth workflow is ready — local/docker calls need no auth and work unchanged.
 """
 
 from __future__ import annotations
 
-from a2a.client.client import ClientConfig
-from a2a.client.client_factory import ClientFactory
-from a2a.client.helpers import create_text_message_object
-from a2a.types import Message, Part, Role, Task, TextPart, TransportProtocol
+import os
+from uuid import uuid4
+
+import httpx
+from a2a.client import ClientConfig
+from strands.agent import A2AAgent
 
 from agents.registry import agent_service_url
 
+# AgentCore requires a session id (>= 33 chars) on every InvokeAgentRuntime request.
+_SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
-def _text_from_part(part: Part) -> str | None:
-    root = getattr(part, "root", None)
-    if isinstance(root, TextPart):
-        return root.text
+
+def _auth_token() -> str | None:
+    """Return a bearer token for inter-agent calls, or None when no auth is needed.
+
+    TODO(machine-oauth): implement the OAuth2 client_credentials flow against the IdP
+    (read client id/secret + token endpoint from env/Secrets Manager, fetch, and cache
+    with a refresh buffer). Until then this returns None and calls go out unauthenticated
+    (correct for local docker-compose; deployed AgentCore calls will 403 until wired).
+    """
     return None
 
 
-def _final_text(task: Task | None) -> str:
-    if task is None:
-        return ""
-    if task.artifacts:
-        for artifact in reversed(task.artifacts):
-            for part in artifact.parts or []:
-                if text := _text_from_part(part):
-                    return text
-    if task.history:
-        for message in reversed(task.history):
-            for part in message.parts or []:
-                if text := _text_from_part(part):
-                    return text
-    return ""
+def _auth_client_config() -> ClientConfig | None:
+    """Build an authenticated A2A ClientConfig, or None to use the default unauthenticated client."""
+    token = _auth_token()
+    if not token:
+        return None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        _SESSION_HEADER: os.getenv("AGENTCORE_SESSION_ID") or uuid4().hex * 2,
+    }
+    return ClientConfig(httpx_client=httpx.AsyncClient(headers=headers))
 
 
 async def call_agent_text(agent_id: str, prompt: str) -> str:
-    """Send a prompt to a remote A2A agent and return its final text artifact."""
-    client_config = ClientConfig(
-        supported_transports=[TransportProtocol.jsonrpc, TransportProtocol.http_json]
-    )
-    client = await ClientFactory.connect(agent_service_url(agent_id), client_config=client_config)
-    message = create_text_message_object(role=Role.user, content=prompt)
-
-    latest_task: Task | None = None
-    async for event in client.send_message(message):
-        if isinstance(event, Message):
-            for part in event.parts or []:
-                if text := _text_from_part(part):
-                    return text
-            return ""
-        latest_task = event[0]
-
-    return _final_text(latest_task)
+    """Send a prompt to a remote A2A agent and return its final text response."""
+    client_config = _auth_client_config()
+    kwargs = {"client_config": client_config} if client_config is not None else {}
+    agent = A2AAgent(endpoint=agent_service_url(agent_id), name=agent_id, **kwargs)
+    result = await agent.invoke_async(prompt)
+    return str(result)

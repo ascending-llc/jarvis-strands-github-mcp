@@ -1,23 +1,34 @@
-"""Standalone A2A service for a single agent, powered by Strands' A2AServer.
+"""AgentCore-compatible A2A entrypoint for a single agent.
 
-One image serves any agent; AGENT_ID selects which. A2AServer handles the agent
-card, the A2A HTTP/JSON + streaming (SSE) endpoints, task state, and per-context
-isolation — replacing the previous hand-rolled a2a-sdk plumbing.
+One image serves any agent; ``AGENT_ID`` selects which. The server is started via
+``bedrock_agentcore.runtime.serve_a2a`` — the AWS-supported A2A entrypoint that
+binds the AgentCore A2A contract (port 9000 at ``/``, ``/ping`` health, agent-card
+serving, Bedrock header propagation) and runs the Strands agent through
+``StrandsA2AExecutor``.
+
+Run locally or in a container the same way::
+
+    AGENT_ID=deep_intel uv run python -m agents.server
 """
 
 from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
-from strands.multiagent.a2a import A2AServer
+from bedrock_agentcore.runtime import serve_a2a
+from strands.multiagent.a2a.executor import StrandsA2AExecutor
 
 from agents.deep_intel.orchestrator import build_orchestrator_agent
 from agents.registry import AGENT_REGISTRY, AgentSpec
 from agents.shared.core.config import load_config
-from agents.shared.core.logging_config import setup_logging
+from agents.shared.core.logging_config import get_logger, setup_logging
+from agents.shared.mcp import build_tavily_mcp_client
 from agents.shared.research_agent import build_research_agent
-from agents.shared.tavily_mcp import build_tavily_mcp_client
+
+logger = get_logger(__name__)
+
+# AgentCore's A2A contract serves on 9000 at the root path; honor PORT for local overrides.
+DEFAULT_PORT = 9000
 
 
 def _load_spec() -> AgentSpec:
@@ -29,18 +40,16 @@ def _load_spec() -> AgentSpec:
     return AGENT_REGISTRY[agent_id]
 
 
-def create_app(agent_id: str | None = None) -> FastAPI:
-    setup_logging()
-    config = load_config()
-    spec = AGENT_REGISTRY[agent_id] if agent_id else _load_spec()
-    base_url = os.getenv("AGENT_BASE_URL", "http://localhost:8000").rstrip("/")
+def build_executor(spec: AgentSpec, config) -> StrandsA2AExecutor:
+    """Build the A2A executor for a spec.
 
+    A fresh agent is built per request context (isolation). Workers share one
+    started Tavily MCP client (a background-threaded ToolProvider) across contexts.
+    """
     if spec.kind == "orchestrator":
         def agent_factory(_context_id: str):
             return build_orchestrator_agent(config)
     else:
-        # One shared, started MCP client (background-threaded ToolProvider) reused
-        # across request contexts; a fresh agent is built per context.
         mcp_client = build_tavily_mcp_client(config)
         mcp_client.start()
 
@@ -54,14 +63,22 @@ def create_app(agent_id: str | None = None) -> FastAPI:
                 mcp_client=mcp_client,
             )
 
-    server = A2AServer(
-        agent_factory=agent_factory,
-        skills=spec.a2a_skills,
-        http_url=base_url,
-        version="0.1.0",
-        serve_at_root=True,
-    )
-    return server.to_fastapi_app()
+    # enable_a2a_compliant_streaming surfaces token/event streaming over A2A SSE —
+    # the streaming goal of this refactor. Flip to False to fall back to single-shot.
+    return StrandsA2AExecutor(agent_factory=agent_factory, enable_a2a_compliant_streaming=True)
 
 
-app = create_app()
+def main() -> None:
+    setup_logging()
+    config = load_config()
+    spec = _load_spec()
+    port = int(os.getenv("PORT", str(DEFAULT_PORT)))
+    logger.info("Starting A2A server for agent_id=%s on port %s", spec.agent_id, port)
+    executor = build_executor(spec, config)
+    # agent_card=None → serve_a2a auto-builds the card by introspecting the executor.
+    # (To advertise spec.a2a_skills explicitly, build an a2a.types.AgentCard and pass it.)
+    serve_a2a(executor, port=port)
+
+
+if __name__ == "__main__":
+    main()

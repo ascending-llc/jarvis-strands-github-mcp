@@ -12,6 +12,7 @@ COPY . /app
 
 RUN uv sync --frozen --no-dev
 
-EXPOSE 8000
+# AgentCore A2A contract: stateless streamable HTTP server on port 9000 at root.
+EXPOSE 9000
 
-CMD ["uv", "run", "uvicorn", "agents.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "python", "-m", "agents.server"]

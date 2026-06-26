@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Type
+from urllib.parse import quote
 
 from a2a.types import AgentSkill
 from pydantic import BaseModel
@@ -29,7 +30,8 @@ class AgentSpec:
     a2a_skills: list[AgentSkill]
     skill_dir: Optional[Path] = None
     output_schema: Optional[Type[BaseModel]] = None
-    url_env: Optional[str] = None  # env var holding this agent's base URL (for callers)
+    url_env: Optional[str] = None  # env var holding this agent's base URL (local/docker callers)
+    arn_env: Optional[str] = None  # env var holding this agent's AgentCore runtime ARN (deployed)
 
 
 AGENT_REGISTRY: dict[str, AgentSpec] = {
@@ -42,6 +44,7 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
         skill_dir=SKILLS_DIR / "aws-opportunity-research",
         output_schema=AwsFindings,
         url_env="AWS_RESEARCH_URL",
+        arn_env="AWS_RESEARCH_AGENT_ARN",
         a2a_skills=[
             AgentSkill(
                 id="aws-opportunity-research",
@@ -61,6 +64,7 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
         skill_dir=SKILLS_DIR / "company-intelligence",
         output_schema=CompanyProfile,
         url_env="BUSINESS_INTEL_URL",
+        arn_env="BUSINESS_INTEL_AGENT_ARN",
         a2a_skills=[
             AgentSkill(
                 id="company-intelligence",
@@ -91,10 +95,33 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
 }
 
 
+def _agentcore_invocation_url(runtime_arn: str) -> str:
+    """Build the AgentCore A2A invocation base URL for a runtime ARN.
+
+    A2A clients resolve the agent card at ``<base>/.well-known/agent-card.json`` and
+    POST JSON-RPC to ``<base>``.
+    """
+    region = os.getenv("AWS_REGION", "us-east-1")
+    return (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/"
+        f"runtimes/{quote(runtime_arn, safe='')}/invocations/"
+    )
+
+
 def agent_service_url(agent_id: str) -> str:
+    """Resolve a target agent's base URL.
+
+    Precedence: explicit URL env (local/docker-compose) → AgentCore runtime ARN env
+    (deployed). A centralized discovery registry can later replace this lookup.
+    """
     spec = AGENT_REGISTRY.get(agent_id)
     if spec and spec.url_env:
         url = os.getenv(spec.url_env)
         if url:
             return url.rstrip("/")
-    raise ValueError(f"Missing base URL for agent: {agent_id} (set {spec.url_env if spec else '?'})")
+    if spec and spec.arn_env:
+        arn = os.getenv(spec.arn_env)
+        if arn:
+            return _agentcore_invocation_url(arn)
+    hints = [e for e in (spec.url_env, spec.arn_env) if spec and e]
+    raise ValueError(f"Missing endpoint for agent: {agent_id} (set one of {hints or '?'})")
