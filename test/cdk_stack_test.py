@@ -114,6 +114,7 @@ def _full_config(**overrides) -> dict:
         "token_secret_prefix": "agentcore",
         "jwt_discovery_url": "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration",
         "jwt_allowed_audience": ["jarvis-managed-agents"],
+        "jarvis_environment": "demo",
         "env": {
             "MODEL": "arn:aws:bedrock:us-east-1:1:application-inference-profile/x",
             "TAVILY_MCP_URL": "https://tavily.example/mcp",
@@ -139,6 +140,7 @@ def test_synth_full_registry_config() -> None:
         assert env["REGISTRY_URL"] == "https://jarvis-demo.ascendingdc.com", key
         assert env["MODEL"].startswith("arn:aws:bedrock"), key
         assert env["TAVILY_MCP_URL"] == "https://tavily.example/mcp", key
+        assert props["Tags"] == {"jarvis-environment": "demo"}, key
         # CDK-injected per-runtime values.
         assert env["AGENT_ID"] == agent_id, key
         assert env["A2A_TOKEN_SECRET_ARN"] == f"agentcore/{agent_id}", key

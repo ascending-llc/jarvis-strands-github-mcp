@@ -101,6 +101,7 @@ class RuntimeStack(cdk.Stack):
             role_arn=role.role_arn,
             environment_variables=env,
             authorizer_configuration=self._authorizer,
+            tags=self._runtime_tags(),
         )
         # CloudFormation only infers a dependency on the Role resource from role_arn,
         # not on the separate AWS::IAM::Policy resource that role.add_to_policy(...)
@@ -115,6 +116,12 @@ class RuntimeStack(cdk.Stack):
 
         cdk.CfnOutput(self, f"Arn-{agent_id}", value=runtime.attr_agent_runtime_arn)
         return runtime
+
+    def _runtime_tags(self) -> dict[str, str] | None:
+        """Resource tags applied to every runtime (e.g. jarvis-environment for federation
+        discovery filtering). Set jarvis_environment in config.toml per environment."""
+        env_tag = self.config.get("jarvis_environment")
+        return {"jarvis-environment": env_tag} if env_tag else None
 
     def _token_secret_resources(self, agent_id: str) -> list[str]:
         """IAM resource ARNs for this agent's own token secret ("{prefix}/{agent_id}").

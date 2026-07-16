@@ -11,6 +11,7 @@
 # infra: what CDK builds
 image_tag = "latest"                       # CI passes the git sha via -c imageTag=<sha>
 token_secret_prefix = "agentcore"          # each agent reads {prefix}/{agent_id}
+jarvis_environment = "demo"                # tags every runtime; registry federation filters by this
 jwt_discovery_url = "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration"
 jwt_allowed_audience = ["jarvis-managed-agents"]
 # jwt_allowed_clients = []                  # optional; jwt_discovery_url = "none" → IAM SigV4
@@ -26,6 +27,7 @@ REGISTRY_URL = "https://jarvis-demo.ascendingdc.com"
 # infra
 image_tag = "latest"
 token_secret_prefix = "agentcore"
+jarvis_environment = "prod"
 jwt_discovery_url = "https://jarvis.ascendingdc.com/.well-known/openid-configuration"
 jwt_allowed_audience = ["jarvis-services"]
 
