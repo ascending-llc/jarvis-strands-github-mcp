@@ -1,0 +1,7 @@
+{
+  "app": "python3 app.py",
+  "context": {
+    "imageTag": "latest",
+    "@aws-cdk/core:newStyleStackSynthesis": true
+  }
+}

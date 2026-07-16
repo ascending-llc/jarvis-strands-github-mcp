@@ -1,0 +1,14 @@
+reports/
+__pycache__/
+.venv/
+*.log
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.claude
+.vscode/
+.DS_Store
+cdk.out/
+cdk/cdk.out/
