@@ -8,15 +8,10 @@ on:
         required: true
         default: "us-east-1"
       ecr_repository:
-        description: "ECR repository (e.g. jarvis/aws-intel)"
+        description: "ECR repository"
         type: string
         required: true
-        default: "jarvis/aws-intel-agent"
-      image_name:
-        description: "Image name tag prefix"
-        type: string
-        required: true
-        default: "aws-intel"
+        default: "agentcore/aws_deep_intel"
       dockerfile:
         description: "Dockerfile path"
         type: string
@@ -54,9 +49,10 @@ jobs:
         with:
           context: .
           file: ${{ inputs.dockerfile }}
-          platforms: linux/amd64
+          # AgentCore Runtime requires linux/arm64 container images.
+          platforms: linux/arm64
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ inputs.image_name }}-${{ github.sha }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ inputs.image_name }}-latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:latest
           provenance: false

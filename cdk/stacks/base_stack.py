@@ -21,7 +21,7 @@ class BaseStack(cdk.Stack):
         self.repository = ecr.Repository(
             self,
             "AgentImage",
-            repository_name="jarvis/aws-intel-agent",
+            repository_name="agentcore/aws_deep_intel",
             image_tag_mutability=ecr.TagMutability.MUTABLE,
             image_scan_on_push=True,
             removal_policy=cdk.RemovalPolicy.RETAIN,
