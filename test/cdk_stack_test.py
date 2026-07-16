@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cdk"))
 
-from stacks.deploy_config import DeployConfig, JwtConfig, load_deploy_config  # noqa: E402
+from stacks.deploy_config import load_deploy_config  # noqa: E402
 
 
 def _write_config(tmp_path, monkeypatch, body: str) -> None:
@@ -28,49 +28,42 @@ VALID_TOML = """
 [dev]
 image_tag = "latest"
 token_secret_prefix = "agentcore"
+jwt_discovery_url = "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration"
+jwt_allowed_audience = ["jarvis-managed-agents"]
 
 [dev.env]
 MODEL = "arn:aws:bedrock:us-east-1:1:application-inference-profile/x"
 TAVILY_MCP_URL = "https://tavily.example/mcp"
 REGISTRY_URL = "https://jarvis-demo.ascendingdc.com"
-
-[dev.jwt]
-discovery_url = "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration"
-allowed_audience = ["jarvis-services"]
 """
 
 
-def test_load_config_from_toml(tmp_path, monkeypatch) -> None:
+def test_load_config_returns_plain_dict(tmp_path, monkeypatch) -> None:
     _write_config(tmp_path, monkeypatch, VALID_TOML)
-    config = load_deploy_config(lambda key: None)
-    assert config.env_name == "dev"
-    assert config.runtime_env["REGISTRY_URL"] == "https://jarvis-demo.ascendingdc.com"
-    assert config.runtime_env["MODEL"].startswith("arn:aws:bedrock")
-    assert config.token_secret_prefix == "agentcore"
-    assert config.token_secret_name("deep_intel") == "agentcore/deep_intel"
-    assert config.jwt.enabled and config.jwt.allowed_audience == ["jarvis-services"]
-    config.validate_for_deploy()  # no raise
+    cfg = load_deploy_config(lambda key: None)
+    assert cfg["image_tag"] == "latest"
+    assert cfg["token_secret_prefix"] == "agentcore"
+    assert cfg["jwt_discovery_url"].startswith("https://jarvis-demo")
+    assert cfg["jwt_allowed_audience"] == ["jarvis-managed-agents"]
+    assert cfg["env"]["REGISTRY_URL"] == "https://jarvis-demo.ascendingdc.com"
+    assert cfg["env"]["MODEL"].startswith("arn:aws:bedrock")
 
 
 def test_local_overlay_merges_env(tmp_path, monkeypatch) -> None:
-    from stacks import deploy_config
-
     _write_config(tmp_path, monkeypatch, VALID_TOML)
     (tmp_path / "config.local.toml").write_text(
         '[dev.env]\nMODEL = "arn:local:override"\nEXTRA_FLAG = "on"\n'
     )
-    config = load_deploy_config(lambda key: None)
-    assert config.runtime_env["MODEL"] == "arn:local:override"  # overlay wins
-    assert config.runtime_env["EXTRA_FLAG"] == "on"  # new key added
-    assert config.runtime_env["TAVILY_MCP_URL"] == "https://tavily.example/mcp"  # base kept
+    cfg = load_deploy_config(lambda key: None)
+    assert cfg["env"]["MODEL"] == "arn:local:override"  # overlay wins
+    assert cfg["env"]["EXTRA_FLAG"] == "on"  # new key added
+    assert cfg["env"]["TAVILY_MCP_URL"] == "https://tavily.example/mcp"  # base kept
 
 
-def test_context_flags_override_file(tmp_path, monkeypatch) -> None:
+def test_image_tag_override(tmp_path, monkeypatch) -> None:
     _write_config(tmp_path, monkeypatch, VALID_TOML)
-    ctx = {"imageTag": "abc123", "jwtAllowedAudience": "other-aud"}
-    config = load_deploy_config(ctx.get)
-    assert config.image_tag == "abc123"
-    assert config.jwt.allowed_audience == ["other-aud"]
+    cfg = load_deploy_config({"imageTag": "abc123"}.get)
+    assert cfg["image_tag"] == "abc123"
 
 
 def test_unknown_env_section_raises(tmp_path, monkeypatch) -> None:
@@ -79,21 +72,17 @@ def test_unknown_env_section_raises(tmp_path, monkeypatch) -> None:
         load_deploy_config({"env": "staging"}.get)
 
 
-def test_missing_required_values_fail_validation() -> None:
-    config = DeployConfig(
-        env_name="dev",
-        image_tag="latest",
-        token_secret_prefix=None,
-        jwt=JwtConfig(discovery_url="https://x/.well-known/openid-configuration"),
-        runtime_env={},
+def test_missing_required_env_raises(tmp_path, monkeypatch) -> None:
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        '[dev]\nimage_tag = "latest"\n\n[dev.env]\nTAVILY_MCP_URL = "https://t.example"\n',
     )
-    with pytest.raises(ValueError) as err:
-        config.validate_for_deploy()
-    msg = str(err.value)
-    assert "env.MODEL" in msg and "env.TAVILY_MCP_URL" in msg and "jwt.allowed_audience" in msg
+    with pytest.raises(ValueError, match=r"env\.MODEL is required"):
+        load_deploy_config(lambda key: None)
 
 
-def _synth(config: DeployConfig):
+def _synth(config: dict):
     import aws_cdk as cdk
     import aws_cdk.assertions as assertions
     from aws_cdk import aws_ecr as ecr
@@ -119,23 +108,20 @@ def _synth(config: DeployConfig):
     return assertions.Template.from_stack(stack)
 
 
-def _full_config(**overrides) -> DeployConfig:
-    values = dict(
-        env_name="dev",
-        image_tag="latest",
-        token_secret_prefix="agentcore",
-        jwt=JwtConfig(
-            discovery_url="https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration",
-            allowed_audience=["jarvis-services"],
-        ),
-        runtime_env={
+def _full_config(**overrides) -> dict:
+    cfg = {
+        "image_tag": "latest",
+        "token_secret_prefix": "agentcore",
+        "jwt_discovery_url": "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration",
+        "jwt_allowed_audience": ["jarvis-managed-agents"],
+        "env": {
             "MODEL": "arn:aws:bedrock:us-east-1:1:application-inference-profile/x",
             "TAVILY_MCP_URL": "https://tavily.example/mcp",
             "REGISTRY_URL": "https://jarvis-demo.ascendingdc.com",
         },
-    )
-    values.update(overrides)
-    return DeployConfig(**values)
+    }
+    cfg.update(overrides)
+    return cfg
 
 
 def test_synth_full_registry_config() -> None:
@@ -149,7 +135,7 @@ def test_synth_full_registry_config() -> None:
         agent_id = props["AgentRuntimeName"]
         seen_agent_ids.add(agent_id)
         env = props["EnvironmentVariables"]
-        # Free-form [env.env] values flow through verbatim to every runtime.
+        # [<env>.env] values flow through verbatim to every runtime.
         assert env["REGISTRY_URL"] == "https://jarvis-demo.ascendingdc.com", key
         assert env["MODEL"].startswith("arn:aws:bedrock"), key
         assert env["TAVILY_MCP_URL"] == "https://tavily.example/mcp", key
@@ -158,7 +144,7 @@ def test_synth_full_registry_config() -> None:
         assert env["A2A_TOKEN_SECRET_ARN"] == f"agentcore/{agent_id}", key
         authorizer = props["AuthorizerConfiguration"]["CustomJWTAuthorizer"]
         assert authorizer["DiscoveryUrl"].startswith("https://jarvis-demo"), key
-        assert authorizer["AllowedAudience"] == ["jarvis-services"], key
+        assert authorizer["AllowedAudience"] == ["jarvis-managed-agents"], key
     assert seen_agent_ids == {"aws_research", "business_intel", "deep_intel"}
 
     # Each role reads only its OWN secret — never a sibling's.
@@ -179,6 +165,6 @@ def test_synth_full_registry_config() -> None:
 
 
 def test_synth_jwt_none_falls_back_to_sigv4() -> None:
-    template = _synth(_full_config(jwt=JwtConfig(discovery_url="none")))
+    template = _synth(_full_config(jwt_discovery_url="none"))
     runtimes = template.find_resources("AWS::BedrockAgentCore::Runtime")
     assert all("AuthorizerConfiguration" not in r["Properties"] for r in runtimes.values())

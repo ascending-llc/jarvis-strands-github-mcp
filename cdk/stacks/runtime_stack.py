@@ -16,8 +16,6 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
-from stacks.deploy_config import DeployConfig
-
 # AgentCore runtime name pattern is [a-zA-Z][a-zA-Z0-9_]{0,47} — underscores OK, no hyphens.
 WORKER_IDS = ["aws_research", "business_intel"]
 ORCHESTRATOR_ID = "deep_intel"
@@ -31,21 +29,21 @@ class RuntimeStack(cdk.Stack):
         *,
         repository: ecr.IRepository,
         reports_bucket: s3.IBucket,
-        config: DeployConfig,
+        config: dict,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        config.validate_for_deploy()
         self.config = config
-        self.container_uri = repository.repository_uri_for_tag(config.image_tag)
+        self.token_prefix = config.get("token_secret_prefix")
+        self.container_uri = repository.repository_uri_for_tag(config.get("image_tag", "latest"))
         self.reports_bucket = reports_bucket
 
-        # App env vars come verbatim from config.toml [env.env] (MODEL, TAVILY_MCP_URL,
+        # App env vars come verbatim from config.toml [<env>.env] (MODEL, TAVILY_MCP_URL,
         # REGISTRY_URL, ...). CDK layers on the few values only it knows; AGENT_ID and
         # the per-agent A2A_TOKEN_SECRET_ARN are added per runtime in _make_runtime.
         self.common_env = {
-            **config.runtime_env,
+            **config.get("env", {}),
             "AWS_REGION": self.region,
             # AgentCore container FS is ephemeral; /tmp is writable. Real output goes to S3.
             "REPORT_OUTPUT_DIR": "/tmp/reports",
@@ -84,8 +82,8 @@ class RuntimeStack(cdk.Stack):
     ) -> agentcore.CfnRuntime:
         role = self._make_execution_role(agent_id, invoke_runtime_arns, allow_reports_write)
         env = {**env, "AGENT_ID": agent_id}
-        if self.config.token_secret_prefix:
-            env["A2A_TOKEN_SECRET_ARN"] = self.config.token_secret_name(agent_id)
+        if self.token_prefix:
+            env["A2A_TOKEN_SECRET_ARN"] = f"{self.token_prefix}/{agent_id}"
 
         runtime = agentcore.CfnRuntime(
             self,
@@ -115,8 +113,10 @@ class RuntimeStack(cdk.Stack):
         literal name and the `-??????` wildcard form. Scoped per agent — a runtime can
         only ever read its own secret, never a sibling's.
         """
-        name = self.config.token_secret_name(agent_id)
-        arn = f"arn:{self.partition}:secretsmanager:{self.region}:{self.account}:secret:{name}"
+        arn = (
+            f"arn:{self.partition}:secretsmanager:{self.region}:{self.account}"
+            f":secret:{self.token_prefix}/{agent_id}"
+        )
         return [arn, f"{arn}-??????"]
 
     def _make_execution_role(
@@ -170,7 +170,7 @@ class RuntimeStack(cdk.Stack):
             self.reports_bucket.grant_write(role)
 
         # Each agent reads its own registry-token secret for outbound A2A calls.
-        if self.config.token_secret_prefix:
+        if self.token_prefix:
             role.add_to_policy(
                 iam.PolicyStatement(
                     actions=["secretsmanager:GetSecretValue"],
@@ -181,19 +181,19 @@ class RuntimeStack(cdk.Stack):
         return role
 
     def _build_jwt_authorizer(self):
-        """Inbound JWT authorizer from config.toml [env.jwt] (discovery_url = "none" → IAM SigV4).
+        """Inbound JWT authorizer from config.toml jwt_* keys (unset / "none" → IAM SigV4).
 
         The discovery URL must be the issuer of the tokens that actually reach the
         runtimes — the Jarvis registry auth-server that proxies calls to them — and
         audience/clients must match its runtimeAccess config for these agents.
         """
-        jwt = self.config.jwt
-        if jwt is None or not jwt.enabled:
+        discovery_url = self.config.get("jwt_discovery_url")
+        if not discovery_url or str(discovery_url).lower() == "none":
             return None
         return agentcore.CfnRuntime.AuthorizerConfigurationProperty(
             custom_jwt_authorizer=agentcore.CfnRuntime.CustomJWTAuthorizerConfigurationProperty(
-                discovery_url=jwt.discovery_url,
-                allowed_audience=jwt.allowed_audience or None,
-                allowed_clients=jwt.allowed_clients or None,
+                discovery_url=discovery_url,
+                allowed_audience=self.config.get("jwt_allowed_audience") or None,
+                allowed_clients=self.config.get("jwt_allowed_clients") or None,
             )
         )

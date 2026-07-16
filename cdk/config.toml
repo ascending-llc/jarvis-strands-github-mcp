@@ -1,52 +1,35 @@
 # Deploy configuration. Select a section with `cdk deploy -c env=dev` (default: dev).
 #
-# Two kinds of values:
-#   - top-level + [env.jwt]: TYPED, drive infrastructure/IAM (image tag, JWT authorizer,
-#     secret-naming prefix). Adding one of these means touching stacks/deploy_config.py.
-#   - [env.env]: FREE-FORM container env vars, passed verbatim into every runtime. Add an
-#     ordinary app env var here and nothing in Python changes.
+# One rule: everything is INFRA (what CDK builds with) except the [<env>.env] block,
+# which is injected verbatim into every container as its runtime environment.
 #
 # Account-specific values (real ARNs) go in the gitignored cdk/config.local.toml, which
 # deep-merges over this file. Secrets never live here — only the Secrets Manager name
 # prefix (token_secret_prefix); the token values are stored in Secrets Manager.
 
 [dev]
-# Image tag to deploy; CI pushes <repo>:<git-sha> and passes it as -c imageTag=<sha>.
-image_tag = "latest"
-
-# Secrets Manager naming prefix for each agent's registry bearer token: the runtime for
-# agent <id> reads "{token_secret_prefix}/<id>" (e.g. agentcore/deep_intel). Each
-# runtime's execution role can only read its own secret.
-token_secret_prefix = "agentcore"
+# infra: what CDK builds
+image_tag = "latest"                       # CI passes the git sha via -c imageTag=<sha>
+token_secret_prefix = "agentcore"          # each agent reads {prefix}/{agent_id}
+jwt_discovery_url = "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration"
+jwt_allowed_audience = ["jarvis-managed-agents"]
+# jwt_allowed_clients = []                  # optional; jwt_discovery_url = "none" → IAM SigV4
 
 [dev.env]
-# Container env vars (app runtime behavior). MODEL + TAVILY_MCP_URL are required by
-# load_config() at startup; set the account-specific values in config.local.toml.
+# app env vars, injected into every container. MODEL + TAVILY_MCP_URL are required by
+# load_config() at startup; set those account-specific values in config.local.toml.
 MODEL = ""
 TAVILY_MCP_URL = ""
-# Jarvis registry the agents route inter-agent A2A calls through (demo instance for dev).
 REGISTRY_URL = "https://jarvis-demo.ascendingdc.com"
 
-[dev.jwt]
-# Inbound auth: runtimes validate caller JWTs against this issuer. Must be the issuer of
-# the tokens that actually reach the runtimes (the registry that proxies to them). Set
-# discovery_url = "none" to fall back to IAM SigV4.
-discovery_url = "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration"
-# Matches the `aud` claim on jarvis-demo user-generated managed-agent tokens (confirmed
-# by decoding a real token from this issuer, 2026-07-16). Prod uses "jarvis-services".
-allowed_audience = ["jarvis-managed-agents"]
-allowed_clients = []
-
 [prod]
+# infra
 image_tag = "latest"
 token_secret_prefix = "agentcore"
+jwt_discovery_url = "https://jarvis.ascendingdc.com/.well-known/openid-configuration"
+jwt_allowed_audience = ["jarvis-services"]
 
 [prod.env]
 MODEL = ""
 TAVILY_MCP_URL = ""
 REGISTRY_URL = "https://jarvis.ascendingdc.com"
-
-[prod.jwt]
-discovery_url = "https://jarvis.ascendingdc.com/.well-known/openid-configuration"
-allowed_audience = ["jarvis-services"]
-allowed_clients = []
