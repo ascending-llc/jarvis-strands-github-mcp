@@ -15,11 +15,11 @@ from typing import Any
 from strands import Agent, tool
 
 from agents.a2a_client import call_agent_text
-from agents.deep_intel.reporting import store_html_report
+from agents.deep_intel.reporting import render_report, store_html_report
 from agents.shared.bedrock import build_bedrock_model
 from agents.shared.core.config import AppConfig, load_config
 from agents.shared.core.logging_config import get_logger
-from agents.shared.schemas import AwsFindings, CompanyProfile
+from agents.shared.schemas import AwsFindings, CompanyProfile, ReportContent
 
 logger = get_logger(__name__)
 
@@ -60,41 +60,46 @@ async def gather_research(user_input: str) -> dict[str, Any]:
 
 @tool(
     name="save_report",
-    description="Persist the final HTML report to disk (and S3 if configured). Pass the "
-    "complete HTML document and the company name. Call this once the report is finished.",
+    description="Render and persist the final report (HTML via template, saved to disk and S3 "
+    "if configured). Pass the complete report content. Call this exactly once, after your "
+    "analysis is done.",
 )
-def save_report(html_document: str, company_name: str) -> dict[str, Any]:
-    _, path, url = store_html_report(html_document, company_name)
+def save_report(report: ReportContent) -> dict[str, Any]:
+    # Strands builds the tool schema from the annotation but passes the raw input dict —
+    # validate explicitly so we get a typed model (and the LLM gets a precise validation
+    # error to self-correct against, instead of an AttributeError).
+    content = ReportContent.model_validate(report)
+    html_document = render_report(content)
+    _, path, url = store_html_report(html_document, content.company_name)
     return {"saved_path": path, "report_url": url}
 
 
 SYSTEM_PROMPT = (
     "You are the master orchestrator for AWS customer intelligence. Your job is to produce "
-    "one complete, self-contained HTML5 report for the user's target company.\n\n"
+    "one complete customer-intelligence report for the user's target company.\n\n"
     "Workflow:\n"
     "1. Call `gather_research` with the user's request to get AWS findings and the company "
     "profile (the two specialists run in parallel).\n"
     "2. Cross-check the two sources for company identity and resolve obvious conflicts.\n"
-    "3. Write a complete HTML5 document with these sections: Executive Summary; AWS "
-    "Opportunities & Case Studies; Strategic Recommendations. Map business challenges to AWS "
-    "opportunities and back recommendations with the case studies. Mark confidence where data "
-    "is thin; write 'Unknown' rather than inventing facts.\n"
-    "4. Call `save_report` with the finished HTML and the company name to persist it.\n"
-    "5. Return the complete HTML document as your final answer.\n\n"
-    "HTML requirements: full HTML5 doc with a <style> block, AWS-branded colors "
-    "(--aws-orange #FF9900, --aws-dark-blue #232F3E, --aws-light-gray #F2F3F3), no external "
-    "assets, all links target=\"_blank\" rel=\"noopener noreferrer\". No markdown fences."
+    "3. Compose the report content: an executive summary, a company snapshot table, AWS "
+    "opportunities mapped to business challenges (with named case studies only when "
+    "verified), and strategic recommendations. Mark confidence honestly; write 'Unknown' "
+    "rather than inventing facts. If research data is thin, say so in data_notice.\n"
+    "4. Call `save_report` with the full report content — the HTML is rendered from a "
+    "template, so provide content only, no markup.\n"
+    "5. Your final answer: a brief summary of key findings plus the saved report path and "
+    "URL returned by save_report. Do NOT output HTML."
 )
 
 
-def build_orchestrator_agent(config: AppConfig | None = None) -> Agent:
+def build_orchestrator_agent(config: AppConfig | None = None, extra_tools: list = ()) -> Agent:
     config = config or load_config()
     return Agent(
         name="deep_intel",
         description="Orchestrates AWS research and business intelligence into a full report.",
         model=build_bedrock_model(config),
         system_prompt=SYSTEM_PROMPT,
-        tools=[gather_research, save_report],
+        tools=[gather_research, save_report, *extra_tools],
     )
 
 
@@ -106,7 +111,7 @@ async def run_report(user_input: str) -> dict[str, Any]:
     prompt = (
         f"User input:\n{user_input}\n\n"
         f"Research findings (JSON):\n{json.dumps(research, indent=2)}\n\n"
-        "Produce the complete HTML report now, then save it."
+        "Compose the report content and save it with save_report now."
     )
     result = await agent.invoke_async(prompt)
     return {"result": str(result), "company_name": research["company_name"]}

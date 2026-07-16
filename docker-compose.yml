@@ -3,6 +3,7 @@ services:
     build: .
     environment:
       AGENT_ID: deep_intel
+      AGENT_BASE_URL: http://deep-intel:9000
       AWS_RESEARCH_URL: http://aws-research:9000
       BUSINESS_INTEL_URL: http://business-intel:9000
     env_file:
@@ -20,6 +21,7 @@ services:
     build: .
     environment:
       AGENT_ID: aws_research
+      AGENT_BASE_URL: http://aws-research:9000
     env_file:
       - .env
     ports:
@@ -31,6 +33,7 @@ services:
     build: .
     environment:
       AGENT_ID: business_intel
+      AGENT_BASE_URL: http://business-intel:9000
     env_file:
       - .env
     ports:

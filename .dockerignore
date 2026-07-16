@@ -6,3 +6,4 @@ logs/
 .gitignore
 *.log
 *.html
+.env

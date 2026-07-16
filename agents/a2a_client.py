@@ -51,9 +51,16 @@ def _auth_client_config() -> ClientConfig | None:
 
 
 async def call_agent_text(agent_id: str, prompt: str) -> str:
-    """Send a prompt to a remote A2A agent and return its final text response."""
+    """Send a prompt to a remote A2A agent and return its final text response.
+
+    With A2A-compliant streaming, the remote answer arrives as many token-chunk parts,
+    which become separate content blocks on the result. ``str(result)`` joins blocks
+    with ``"\\n"`` — injecting newlines mid-word and corrupting JSON payloads — so we
+    concatenate the text blocks ourselves with no separator.
+    """
     client_config = _auth_client_config()
     kwargs = {"client_config": client_config} if client_config is not None else {}
     agent = A2AAgent(endpoint=agent_service_url(agent_id), name=agent_id, **kwargs)
     result = await agent.invoke_async(prompt)
-    return str(result)
+    blocks = result.message.get("content", [])
+    return "".join(b["text"] for b in blocks if isinstance(b, dict) and "text" in b)

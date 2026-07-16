@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWS Customer Intelligence Report: {{ r.company_name }}</title>
+<style>
+  :root {
+    --aws-orange: #FF9900;
+    --aws-dark-blue: #232F3E;
+    --aws-light-gray: #F2F3F3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--aws-light-gray);
+    color: #222;
+    line-height: 1.6;
+  }
+  header {
+    background: var(--aws-dark-blue);
+    color: #fff;
+    padding: 2.5rem 2rem;
+    border-bottom: 6px solid var(--aws-orange);
+  }
+  header h1 { margin: 0 0 0.5rem 0; font-size: 2rem; }
+  header p { margin: 0; color: #d9d9d9; font-size: 1rem; }
+  .badge {
+    display: inline-block;
+    background: var(--aws-orange);
+    color: var(--aws-dark-blue);
+    font-weight: 700;
+    padding: 0.2rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+  section {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1.8rem 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  section h2 {
+    color: var(--aws-dark-blue);
+    border-left: 5px solid var(--aws-orange);
+    padding-left: 0.7rem;
+    margin-top: 0;
+    font-size: 1.5rem;
+  }
+  .prose { white-space: pre-line; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td {
+    text-align: left;
+    padding: 0.7rem;
+    border-bottom: 1px solid #e0e0e0;
+    vertical-align: top;
+  }
+  th { background: var(--aws-dark-blue); color: #fff; }
+  tr:nth-child(even) { background: var(--aws-light-gray); }
+  .confidence-low { color: #b34700; font-weight: 600; }
+  .confidence-medium { color: #8a6d00; font-weight: 600; }
+  .confidence-high { color: #1a7a3d; font-weight: 600; }
+  .unknown { color: #888; font-style: italic; }
+  ol.recs { padding-left: 1.3rem; }
+  ol.recs li { margin-bottom: 0.9rem; }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.2rem;
+    margin-top: 1rem;
+  }
+  .card {
+    border: 1px solid #e2e2e2;
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    background: var(--aws-light-gray);
+  }
+  .card h4 { margin: 0 0 0.5rem 0; color: var(--aws-dark-blue); }
+  .card .services { font-size: 0.85rem; color: #555; margin-top: 0.6rem; }
+  .card .priority { float: right; font-size: 0.75rem; font-weight: 700; color: var(--aws-dark-blue); }
+  .note-box {
+    background: #fff7e6;
+    border: 1px solid var(--aws-orange);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-top: 1rem;
+    font-size: 0.95rem;
+  }
+  footer { text-align: center; padding: 1.5rem; color: #777; font-size: 0.85rem; }
+  a { color: var(--aws-orange); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul.sources { padding-left: 1.3rem; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AWS Customer Intelligence Report: {{ r.company_name }} <span class="badge">Confidence: {{ r.confidence }}</span></h1>
+  <p>Prepared for internal AWS account planning purposes.</p>
+</header>
+
+<main>
+
+{% if r.data_notice %}
+  <section id="data-note">
+    <h2>Data Availability Notice</h2>
+    <p class="prose">{{ r.data_notice }}</p>
+  </section>
+{% endif %}
+
+  <section id="executive-summary">
+    <h2>Executive Summary</h2>
+    <p class="prose">{{ r.executive_summary }}</p>
+{% if r.snapshot %}
+    <table>
+      <tr><th>Attribute</th><th>Value</th><th>Confidence</th></tr>
+{% for row in r.snapshot %}
+      <tr>
+        <td>{{ row.attribute }}</td>
+        <td{% if row.value == 'Unknown' %} class="unknown"{% endif %}>{{ row.value }}</td>
+        <td class="confidence-{{ row.confidence | lower }}">{{ row.confidence }}</td>
+      </tr>
+{% endfor %}
+    </table>
+{% endif %}
+  </section>
+
+  <section id="opportunities">
+    <h2>AWS Opportunities &amp; Case Studies</h2>
+{% if r.opportunities %}
+    <div class="card-grid">
+{% for opp in r.opportunities %}
+      <div class="card">
+{% if opp.priority %}<span class="priority">{{ opp.priority }}</span>{% endif %}
+        <h4>{{ opp.title }}</h4>
+        <p>{{ opp.description }}</p>
+{% if opp.case_study %}
+        <p><strong>Case study:</strong> {{ opp.case_study }}</p>
+{% else %}
+        <p class="unknown">No verified case study for this opportunity.</p>
+{% endif %}
+{% if opp.aws_services %}
+        <div class="services"><strong>AWS services:</strong> {{ opp.aws_services | join(', ') }}</div>
+{% endif %}
+      </div>
+{% endfor %}
+    </div>
+{% else %}
+    <p class="unknown">No opportunities identified in this run.</p>
+{% endif %}
+  </section>
+
+  <section id="recommendations">
+    <h2>Strategic Recommendations</h2>
+{% if r.recommendations %}
+    <ol class="recs">
+{% for rec in r.recommendations %}
+      <li><strong>{{ rec.title }}.</strong> {{ rec.detail }}</li>
+{% endfor %}
+    </ol>
+{% else %}
+    <p class="unknown">No recommendations produced in this run.</p>
+{% endif %}
+  </section>
+
+{% if r.sources %}
+  <section id="sources">
+    <h2>Sources</h2>
+    <ul class="sources">
+{% for src in r.sources %}
+      <li><a href="{{ src }}" target="_blank" rel="noopener noreferrer">{{ src }}</a></li>
+{% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
+</main>
+
+<footer>
+  Generated automatically as part of an AWS account intelligence workflow.
+  Overall confidence: {{ r.confidence }}. Verify all unconfirmed items before customer-facing use.
+</footer>
+
+</body>
+</html>

@@ -78,6 +78,58 @@ class CompanyProfile(BaseModel):
     sources: list[str] = Field(default_factory=list)
 
 
+# --- Report content (orchestrator -> Jinja2 template) ---------------------------
+#
+# The LLM produces ONLY this content; all HTML/CSS/layout lives in
+# agents/shared/templates/report.html.j2. Keeps synthesis fast (no markup tokens),
+# the page always valid, and the branding consistent across runs.
+
+
+class SnapshotRow(BaseModel):
+    """One attribute row in the company snapshot table."""
+
+    attribute: str = Field(description="Attribute name, e.g. 'Industry Vertical'")
+    value: str = Field(description="Value, or 'Unknown' when not confirmed")
+    confidence: str = Field(default="MEDIUM", description="HIGH | MEDIUM | LOW")
+
+
+class ReportOpportunity(BaseModel):
+    """One AWS opportunity presented in the report."""
+
+    title: str = Field(description="Short opportunity name")
+    description: str = Field(description="What the opportunity is and why it fits this company")
+    aws_services: list[str] = Field(default_factory=list, description="Relevant AWS services")
+    case_study: str | None = Field(
+        default=None, description="Named supporting case study with outcome, or None if unverified"
+    )
+    priority: str | None = Field(default=None, description="High | Medium | Low")
+
+
+class ReportRecommendation(BaseModel):
+    """One strategic recommendation."""
+
+    title: str = Field(description="Short recommendation headline")
+    detail: str = Field(description="Concrete action and rationale")
+
+
+class ReportContent(BaseModel):
+    """Everything the LLM contributes to the HTML report — prose and data, no markup."""
+
+    company_name: str = Field(description="Official company name used in the report title")
+    executive_summary: str = Field(
+        description="2-4 paragraph executive summary; separate paragraphs with blank lines"
+    )
+    snapshot: list[SnapshotRow] = Field(default_factory=list, description="Company snapshot rows")
+    data_notice: str | None = Field(
+        default=None,
+        description="Shown prominently when research data is thin/unverified; None when data is solid",
+    )
+    opportunities: list[ReportOpportunity] = Field(default_factory=list)
+    recommendations: list[ReportRecommendation] = Field(default_factory=list)
+    confidence: str = Field(default="MEDIUM", description="Overall confidence: HIGH | MEDIUM | LOW")
+    sources: list[str] = Field(default_factory=list, description="Source URLs used in research")
+
+
 # --- Worker request envelope ---------------------------------------------------
 
 

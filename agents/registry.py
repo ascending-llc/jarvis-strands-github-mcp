@@ -9,15 +9,25 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Type
+from typing import Callable, Optional, Type
 from urllib.parse import quote
 
 from a2a.types import AgentSkill
 from pydantic import BaseModel
+from strands.tools.mcp import MCPClient
 
+from agents.shared.core.config import AppConfig
+from agents.shared.mcp import build_tavily_mcp_client
 from agents.shared.schemas import AwsFindings, CompanyProfile
 
 SKILLS_DIR = Path(__file__).parent / "skills"
+
+# Maps a short name (used in AgentSpec.mcp_servers) to its client builder. Any agent can
+# opt into any MCP server by listing its name in the registry — capability is a per-agent
+# declaration here, not a hardcoded branch on agent kind in server.py.
+MCP_BUILDERS: dict[str, Callable[[AppConfig], MCPClient]] = {
+    "tavily": build_tavily_mcp_client,
+}
 
 
 @dataclass(frozen=True)
@@ -32,6 +42,7 @@ class AgentSpec:
     output_schema: Optional[Type[BaseModel]] = None
     url_env: Optional[str] = None  # env var holding this agent's base URL (local/docker callers)
     arn_env: Optional[str] = None  # env var holding this agent's AgentCore runtime ARN (deployed)
+    mcp_servers: list[str] = field(default_factory=list)  # names into MCP_BUILDERS this agent uses
 
 
 AGENT_REGISTRY: dict[str, AgentSpec] = {
@@ -45,6 +56,7 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
         output_schema=AwsFindings,
         url_env="AWS_RESEARCH_URL",
         arn_env="AWS_RESEARCH_AGENT_ARN",
+        mcp_servers=["tavily"],
         a2a_skills=[
             AgentSkill(
                 id="aws-opportunity-research",
@@ -65,6 +77,7 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
         output_schema=CompanyProfile,
         url_env="BUSINESS_INTEL_URL",
         arn_env="BUSINESS_INTEL_AGENT_ARN",
+        mcp_servers=["tavily"],
         a2a_skills=[
             AgentSkill(
                 id="company-intelligence",

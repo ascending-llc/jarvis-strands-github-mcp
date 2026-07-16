@@ -1,14 +1,34 @@
-"""Report storage and optional upload helpers."""
+"""Report rendering, storage, and optional upload helpers.
+
+HTML is rendered deterministically from a validated ``ReportContent`` via a Jinja2
+template — the LLM contributes only the content (see agents/shared/schemas.py), never
+markup. The template owns layout/CSS, so every report is valid, consistent HTML.
+"""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 import boto3
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from agents.shared.core.config import load_config
+from agents.shared.schemas import ReportContent
 from agents.shared.utils import ensure_dir, save_report, utc_timestamp
+
+_TEMPLATES_DIR = Path(__file__).parent.parent / "shared" / "templates"
+
+_jinja_env = Environment(
+    loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+    autoescape=select_autoescape(["html", "j2"]),
+)
+
+
+def render_report(content: ReportContent) -> str:
+    """Render the HTML report from validated report content."""
+    return _jinja_env.get_template("report.html.j2").render(r=content)
 
 
 def upload_report_if_configured(html_path: Optional[str], config: Any) -> Optional[str]:
