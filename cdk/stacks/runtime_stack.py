@@ -102,6 +102,16 @@ class RuntimeStack(cdk.Stack):
             environment_variables=env,
             authorizer_configuration=self._authorizer,
         )
+        # CloudFormation only infers a dependency on the Role resource from role_arn,
+        # not on the separate AWS::IAM::Policy resource that role.add_to_policy(...)
+        # lazily creates for its permissions (ECR pull, etc.) — a documented CDK gap
+        # (aws/aws-cdk#35845). Without this, the runtime can be created before its
+        # execution role's ECR permissions are actually attached, and AgentCore's
+        # image-pull validation fails with a misleading "Access denied" error.
+        runtime.node.add_dependency(role)
+        default_policy = role.node.try_find_child("DefaultPolicy")
+        if default_policy is not None:
+            runtime.node.add_dependency(default_policy)
 
         cdk.CfnOutput(self, f"Arn-{agent_id}", value=runtime.attr_agent_runtime_arn)
         return runtime
