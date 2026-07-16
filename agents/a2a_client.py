@@ -6,10 +6,11 @@ transport negotiation, card resolution, and streaming. We keep a small helper he
 the orchestrator can fan out to workers with guaranteed parallelism (asyncio.gather)
 rather than relying on model-driven tool calls.
 
-AUTH (deferred): calling a deployed AgentCore runtime requires a bearer token (from the
-machine OAuth client-credentials flow) plus the AgentCore session header. The plumbing
-lives in ``_auth_client_config`` below but is intentionally a no-op until the machine
-OAuth workflow is ready — local/docker calls need no auth and work unchanged.
+AUTH: calling a deployed AgentCore runtime requires a bearer token plus the AgentCore
+session header. Tokens are pass-through for now (see ``agents/shared/auth.py``): the
+orchestrator reuses the JWT its own caller presented (or ``A2A_BEARER_TOKEN`` as a
+manual override). Local/docker calls have no incoming token and go out
+unauthenticated, unchanged.
 """
 
 from __future__ import annotations
@@ -22,25 +23,15 @@ from a2a.client import ClientConfig
 from strands.agent import A2AAgent
 
 from agents.registry import agent_service_url
+from agents.shared.auth import get_bearer_token
 
 # AgentCore requires a session id (>= 33 chars) on every InvokeAgentRuntime request.
 _SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
 
-def _auth_token() -> str | None:
-    """Return a bearer token for inter-agent calls, or None when no auth is needed.
-
-    TODO(machine-oauth): implement the OAuth2 client_credentials flow against the IdP
-    (read client id/secret + token endpoint from env/Secrets Manager, fetch, and cache
-    with a refresh buffer). Until then this returns None and calls go out unauthenticated
-    (correct for local docker-compose; deployed AgentCore calls will 403 until wired).
-    """
-    return None
-
-
 def _auth_client_config() -> ClientConfig | None:
     """Build an authenticated A2A ClientConfig, or None to use the default unauthenticated client."""
-    token = _auth_token()
+    token = get_bearer_token()
     if not token:
         return None
     headers = {

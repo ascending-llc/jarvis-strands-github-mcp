@@ -30,8 +30,24 @@ cdk deploy JarvisAgentsRuntime \
   -c tavilyMcpUrl=<tavily-mcp-url> \
   -c jwtDiscoveryUrl=https://login.microsoftonline.com/<TENANT_ID>/v2.0/.well-known/openid-configuration \
   -c jwtAllowedAudience=api://<your-api-app-id> \
-  -c jwtAllowedClients=<deep-intel-client-id>
+  -c jwtAllowedClients=<frontend-client-id>
 ```
+
+## Auth
+
+- **Inbound** (`jwt*` context): every runtime gets a `customJWTAuthorizer` built from
+  `jwtDiscoveryUrl` / `jwtAllowedAudience` / `jwtAllowedClients` — AgentCore uses the
+  discovery URL only to fetch signing keys and validate/decode the caller's JWT. Omit
+  `jwtDiscoveryUrl` entirely → runtimes default to IAM SigV4.
+- **Inter-agent** is bearer-token **passthrough** (`agents/shared/auth.py`): the platform
+  frontend obtains the JWT and invokes `deep_intel` with it; the orchestrator reuses that
+  same token when calling the worker runtimes, and the workers validate it against the
+  same discovery URL. No OAuth client config, secret, or extra CDK context is needed —
+  just make sure the token's audience/client passes the same `jwt*` values on the
+  workers. For smoke-testing without the frontend, `A2A_BEARER_TOKEN` can be set on the
+  orchestrator's env as a manual token override.
+- **Later**: replace passthrough with a machine (client-credentials) OAuth flow so
+  orchestrations aren't bounded by the frontend token's lifetime.
 
 Workers are created before the orchestrator; their runtime ARNs are injected into
 `deep_intel`'s env (`AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN`) and granted
@@ -46,9 +62,6 @@ aws bedrock-agentcore-control update-agent-runtime --agent-runtime-id <id> ...
 you want the rollout tracked in IaC.
 
 ## Not yet wired
-- **Inbound auth** (`jwt*` context): copy values from your existing AgentCore runtime.
-  Omit them entirely → runtime defaults to IAM SigV4.
-- **Inter-agent auth**: `deep_intel` → workers needs a bearer token; the seam is in
-  `agents/a2a_client.py` (`_auth_token`), a no-op until the machine-OAuth flow is ready.
-- **Secrets** (`TAVILY_MCP_TOKEN`, OAuth client secret): move to Secrets Manager rather
-  than plain env.
+- **Machine OAuth**: inter-agent auth is currently token passthrough (see Auth above);
+  a client-credentials flow should eventually replace it.
+- **Secrets** (`TAVILY_MCP_TOKEN`): move to Secrets Manager rather than plain env.

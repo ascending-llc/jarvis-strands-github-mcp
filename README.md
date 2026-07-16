@@ -213,7 +213,7 @@ docker-compose.yml               # Three agent services (host ports 9001-9003)
 agents/
 ├── server.py                    # Entrypoint: AGENT_ID → registry spec → serve_a2a (port 9000)
 ├── registry.py                  # ⭐ Source of truth: agent specs, schemas, skills, MCP servers, discovery
-├── a2a_client.py                # Thin A2A client for parallel worker calls (+ deferred auth seam)
+├── a2a_client.py                # Thin A2A client for parallel worker calls (+ bearer passthrough)
 ├── deep_intel/
 │   ├── orchestrator.py          # Orchestrator agent: gather_research + save_report tools
 │   └── reporting.py             # Jinja2 rendering, disk storage, optional S3 upload
@@ -256,8 +256,9 @@ Covers the worker→orchestrator typed contract (`_coerce`), the report renderer
 
 ## 🗺️ Roadmap
 
-- [ ] **Inter-agent auth for deployed runtimes** — machine OAuth (client-credentials) in `a2a_client.py:_auth_token`; deployed orchestrator→worker calls 403 until wired
-- [ ] **Secrets hygiene** — move `TAVILY_MCP_TOKEN` / OAuth client secret to AWS Secrets Manager
+- [x] **Inter-agent auth for deployed runtimes** — bearer-token passthrough (`agents/shared/auth.py`): the orchestrator reuses its caller's JWT on worker calls
+- [ ] **Machine OAuth (client-credentials)** — replace passthrough so orchestrations aren't bounded by the frontend token's lifetime
+- [ ] **Secrets hygiene** — move `TAVILY_MCP_TOKEN` to AWS Secrets Manager
 - [ ] **Tool-error observability** — WARNING-level hook for failed tool calls
 - [ ] **Persistent task store** — tasks are in-memory today and don't survive restarts
 

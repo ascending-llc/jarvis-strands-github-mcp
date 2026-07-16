@@ -46,8 +46,7 @@ class RuntimeStack(cdk.Stack):
             # AgentCore container FS is ephemeral; /tmp is writable. Real output goes to S3.
             "REPORT_OUTPUT_DIR": "/tmp/reports",
         }
-        # TODO(secrets): move TAVILY_MCP_TOKEN and the machine-OAuth client secret to
-        # Secrets Manager and inject/read them at runtime rather than as plain env.
+        # TODO(secrets): move TAVILY_MCP_TOKEN to Secrets Manager rather than plain env.
 
         self._authorizer = self._build_jwt_authorizer()
 
@@ -57,6 +56,9 @@ class RuntimeStack(cdk.Stack):
             worker_runtimes[agent_id] = self._make_runtime(agent_id, env=dict(self.common_env))
 
         # Orchestrator: worker ARNs injected as env + InvokeAgentRuntime granted + S3 write.
+        # Inter-agent auth is bearer-token PASSTHROUGH (agents/shared/auth.py): the
+        # orchestrator reuses the JWT its caller presented, so no OAuth client config
+        # or secret is provisioned here.
         worker_arns = [r.attr_agent_runtime_arn for r in worker_runtimes.values()]
         orch_env = dict(self.common_env)
         orch_env["AWS_RESEARCH_AGENT_ARN"] = worker_runtimes["aws_research"].attr_agent_runtime_arn
@@ -159,9 +161,8 @@ class RuntimeStack(cdk.Stack):
     def _build_jwt_authorizer(self):
         """Inbound JWT authorizer (Entra/your IdP). Returns None → defaults to IAM SigV4.
 
-        TODO(auth): copy these values from your existing AgentCore runtime. Provide via
-        `cdk deploy -c jwtDiscoveryUrl=... -c jwtAllowedAudience=... -c jwtAllowedClients=...`.
-        Discovery URL must end in /.well-known/openid-configuration.
+        Provide via `cdk deploy -c jwtDiscoveryUrl=... -c jwtAllowedAudience=... -c
+        jwtAllowedClients=...`. Discovery URL must end in /.well-known/openid-configuration.
         """
         ctx = self.node.try_get_context
         discovery_url = ctx("jwtDiscoveryUrl")
