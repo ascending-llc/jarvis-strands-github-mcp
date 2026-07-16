@@ -3,7 +3,8 @@
 Workers are created first so the orchestrator can reference their runtime ARNs (injected
 as env vars + granted InvokeAgentRuntime). All three use the same container image; only
 AGENT_ID (and the orchestrator's extra wiring) differs — the docker-compose model lifted
-to AgentCore.
+to AgentCore. All deploy values come from cdk/config.toml (see stacks/deploy_config.py);
+-c flags override per deploy.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
+
+from stacks.deploy_config import DeployConfig
 
 # AgentCore runtime name pattern is [a-zA-Z][a-zA-Z0-9_]{0,47} — underscores OK, no hyphens.
 WORKER_IDS = ["aws_research", "business_intel"]
@@ -28,32 +31,25 @@ class RuntimeStack(cdk.Stack):
         *,
         repository: ecr.IRepository,
         reports_bucket: s3.IBucket,
-        image_tag: str,
+        config: DeployConfig,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.container_uri = repository.repository_uri_for_tag(image_tag)
+        config.validate_for_deploy()
+        self.config = config
+        self.container_uri = repository.repository_uri_for_tag(config.image_tag)
         self.reports_bucket = reports_bucket
 
-        # --- shared runtime config (set real values via `cdk deploy -c key=value`) ---
-        ctx = self.node.try_get_context
+        # App env vars come verbatim from config.toml [env.env] (MODEL, TAVILY_MCP_URL,
+        # REGISTRY_URL, ...). CDK layers on the few values only it knows; AGENT_ID and
+        # the per-agent A2A_TOKEN_SECRET_ARN are added per runtime in _make_runtime.
         self.common_env = {
-            # MODEL and TAVILY_MCP_URL are required by load_config() at container startup.
-            "MODEL": ctx("model") or "REPLACE_WITH_BEDROCK_MODEL_ID",
-            "TAVILY_MCP_URL": ctx("tavilyMcpUrl") or "REPLACE_WITH_TAVILY_MCP_URL",
+            **config.runtime_env,
             "AWS_REGION": self.region,
             # AgentCore container FS is ephemeral; /tmp is writable. Real output goes to S3.
             "REPORT_OUTPUT_DIR": "/tmp/reports",
         }
-        # Inter-agent calls route through the Jarvis registry A2A proxy, authenticated
-        # with a static Entra ID token in Secrets Manager (read at runtime, TTL-cached).
-        self.token_secret_arn = ctx("tokenSecretArn")
-        if ctx("registryUrl"):
-            self.common_env["REGISTRY_URL"] = ctx("registryUrl")
-        if self.token_secret_arn:
-            self.common_env["A2A_TOKEN_SECRET_ARN"] = self.token_secret_arn
-        # TODO(secrets): move TAVILY_MCP_TOKEN to Secrets Manager rather than plain env.
 
         self._authorizer = self._build_jwt_authorizer()
 
@@ -63,9 +59,6 @@ class RuntimeStack(cdk.Stack):
             worker_runtimes[agent_id] = self._make_runtime(agent_id, env=dict(self.common_env))
 
         # Orchestrator: worker ARNs injected as env + InvokeAgentRuntime granted + S3 write.
-        # Inter-agent auth is bearer-token PASSTHROUGH (agents/shared/auth.py): the
-        # orchestrator reuses the JWT its caller presented, so no OAuth client config
-        # or secret is provisioned here.
         worker_arns = [r.attr_agent_runtime_arn for r in worker_runtimes.values()]
         orch_env = dict(self.common_env)
         orch_env["AWS_RESEARCH_AGENT_ARN"] = worker_runtimes["aws_research"].attr_agent_runtime_arn
@@ -91,6 +84,8 @@ class RuntimeStack(cdk.Stack):
     ) -> agentcore.CfnRuntime:
         role = self._make_execution_role(agent_id, invoke_runtime_arns, allow_reports_write)
         env = {**env, "AGENT_ID": agent_id}
+        if self.config.token_secret_prefix:
+            env["A2A_TOKEN_SECRET_ARN"] = self.config.token_secret_name(agent_id)
 
         runtime = agentcore.CfnRuntime(
             self,
@@ -112,6 +107,17 @@ class RuntimeStack(cdk.Stack):
 
         cdk.CfnOutput(self, f"Arn-{agent_id}", value=runtime.attr_agent_runtime_arn)
         return runtime
+
+    def _token_secret_resources(self, agent_id: str) -> list[str]:
+        """IAM resource ARNs for this agent's own token secret ("{prefix}/{agent_id}").
+
+        Secrets Manager appends a random 6-char suffix to secret ARNs, so grant both the
+        literal name and the `-??????` wildcard form. Scoped per agent — a runtime can
+        only ever read its own secret, never a sibling's.
+        """
+        name = self.config.token_secret_name(agent_id)
+        arn = f"arn:{self.partition}:secretsmanager:{self.region}:{self.account}:secret:{name}"
+        return [arn, f"{arn}-??????"]
 
     def _make_execution_role(
         self,
@@ -163,54 +169,31 @@ class RuntimeStack(cdk.Stack):
         if allow_reports_write:
             self.reports_bucket.grant_write(role)
 
-        # Every agent reads the shared Entra token secret for registry calls. Secrets
-        # Manager ARNs carry a random 6-char suffix; grant both forms so a suffix-less
-        # name also works.
-        if self.token_secret_arn:
+        # Each agent reads its own registry-token secret for outbound A2A calls.
+        if self.config.token_secret_prefix:
             role.add_to_policy(
                 iam.PolicyStatement(
                     actions=["secretsmanager:GetSecretValue"],
-                    resources=[self.token_secret_arn, f"{self.token_secret_arn}-??????"],
+                    resources=self._token_secret_resources(agent_id),
                 )
             )
 
         return role
 
-    # The Jarvis registry's auth-server: runtimes validate the short-lived JWTs the
-    # registry mints for downstream calls against this issuer's signing keys.
-    DEFAULT_JWT_DISCOVERY_URL = "https://jarvis.ascendingdc.com/.well-known/openid-configuration"
-
     def _build_jwt_authorizer(self):
-        """Inbound JWT authorizer. Defaults to the Jarvis registry auth-server issuer.
+        """Inbound JWT authorizer from config.toml [env.jwt] (discovery_url = "none" → IAM SigV4).
 
-        Override via `cdk deploy -c jwtDiscoveryUrl=... -c jwtAllowedAudience=... -c
-        jwtAllowedClients=...` (audience/clients must match the registry's runtimeAccess
-        config for these agents). Pass `-c jwtDiscoveryUrl=none` to disable JWT auth
-        entirely and fall back to IAM SigV4.
+        The discovery URL must be the issuer of the tokens that actually reach the
+        runtimes — the Jarvis registry auth-server that proxies calls to them — and
+        audience/clients must match its runtimeAccess config for these agents.
         """
-        ctx = self.node.try_get_context
-        discovery_url = ctx("jwtDiscoveryUrl") or self.DEFAULT_JWT_DISCOVERY_URL
-        if discovery_url.lower() == "none":
+        jwt = self.config.jwt
+        if jwt is None or not jwt.enabled:
             return None
-
-        def _as_list(val):
-            if val is None:
-                return None
-            return val if isinstance(val, list) else [val]
-
-        audience = _as_list(ctx("jwtAllowedAudience"))
-        clients = _as_list(ctx("jwtAllowedClients"))
-        if not audience and not clients:
-            raise ValueError(
-                "JWT authorizer needs at least one of -c jwtAllowedAudience=... / "
-                "-c jwtAllowedClients=... (values must match the registry's runtimeAccess "
-                "config for these agents), or -c jwtDiscoveryUrl=none for IAM SigV4."
-            )
-
         return agentcore.CfnRuntime.AuthorizerConfigurationProperty(
             custom_jwt_authorizer=agentcore.CfnRuntime.CustomJWTAuthorizerConfigurationProperty(
-                discovery_url=discovery_url,
-                allowed_audience=audience,
-                allowed_clients=clients,
+                discovery_url=jwt.discovery_url,
+                allowed_audience=jwt.allowed_audience or None,
+                allowed_clients=jwt.allowed_clients or None,
             )
         )

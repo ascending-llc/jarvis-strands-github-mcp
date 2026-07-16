@@ -119,7 +119,7 @@ S3_BUCKET=your-reports-bucket
 | `<AGENT_ID>_REGISTRY_PATH` | ❌ | agent id | Registry path slug override per agent (e.g. `AWS_RESEARCH_REGISTRY_PATH`) |
 | `AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN` | ❌ | — | AgentCore runtime ARNs (direct-call fallback when no registry) |
 | `A2A_BEARER_TOKEN` | ❌ | — | Static bearer token for outbound A2A calls (highest auth precedence) |
-| `A2A_TOKEN_SECRET_ARN` | ❌ | — | Secrets Manager secret holding the Entra ID token (raw or `{"token": ...}`), TTL-cached ~5 min |
+| `A2A_TOKEN_SECRET_ARN` | ❌ | — | Secrets Manager secret (per agent, e.g. `agentcore/deep_intel`) holding the Entra ID token (raw or `{"token": ...}`), TTL-cached ~5 min |
 
 </details>
 
