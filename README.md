@@ -114,8 +114,12 @@ S3_BUCKET=your-reports-bucket
 | `ORCHESTRATOR_LOG_FILE` | ❌ | `orchestrator.log` | Log file path |
 | `PORT` | ❌ | `9000` | Local port override |
 | `AGENT_BASE_URL` | ⚠️ | `http://localhost:<PORT>` | URL **other agents** use to reach this one — advertised in the agent card. Set per-service (compose does this); never set globally |
-| `DEEP_INTEL_URL` / `AWS_RESEARCH_URL` / `BUSINESS_INTEL_URL` | ❌ | — | Explicit peer URLs (local/docker discovery) |
-| `AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN` | ❌ | — | AgentCore runtime ARNs (deployed discovery fallback) |
+| `DEEP_INTEL_URL` / `AWS_RESEARCH_URL` / `BUSINESS_INTEL_URL` | ❌ | — | Explicit peer URLs (local/docker discovery, highest precedence) |
+| `REGISTRY_URL` | ❌ | — | Jarvis registry base URL; peers resolve to `{REGISTRY_URL}/api/v1/proxy/a2a/{path}` (deployed discovery) |
+| `<AGENT_ID>_REGISTRY_PATH` | ❌ | agent id | Registry path slug override per agent (e.g. `AWS_RESEARCH_REGISTRY_PATH`) |
+| `AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN` | ❌ | — | AgentCore runtime ARNs (direct-call fallback when no registry) |
+| `A2A_BEARER_TOKEN` | ❌ | — | Static bearer token for outbound A2A calls (highest auth precedence) |
+| `A2A_TOKEN_SECRET_ARN` | ❌ | — | Secrets Manager secret holding the Entra ID token (raw or `{"token": ...}`), TTL-cached ~5 min |
 
 </details>
 
@@ -256,8 +260,9 @@ Covers the worker→orchestrator typed contract (`_coerce`), the report renderer
 
 ## 🗺️ Roadmap
 
-- [x] **Inter-agent auth for deployed runtimes** — bearer-token passthrough (`agents/shared/auth.py`): the orchestrator reuses its caller's JWT on worker calls
-- [ ] **Machine OAuth (client-credentials)** — replace passthrough so orchestrations aren't bounded by the frontend token's lifetime
+- [x] **Registry-based discovery & invocation** — deployed inter-agent calls route through the Jarvis registry A2A proxy (`REGISTRY_URL`), replacing hard-coded runtime ARNs
+- [x] **Inter-agent auth for deployed runtimes** — static Entra ID token from env/Secrets Manager (`agents/shared/auth.py`), with caller-JWT passthrough as fallback
+- [ ] **Machine OAuth (client-credentials)** — replace the manually-rotated static token
 - [ ] **Secrets hygiene** — move `TAVILY_MCP_TOKEN` to AWS Secrets Manager
 - [ ] **Tool-error observability** — WARNING-level hook for failed tool calls
 - [ ] **Persistent task store** — tasks are in-memory today and don't survive restarts

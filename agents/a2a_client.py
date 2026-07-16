@@ -6,11 +6,11 @@ transport negotiation, card resolution, and streaming. We keep a small helper he
 the orchestrator can fan out to workers with guaranteed parallelism (asyncio.gather)
 rather than relying on model-driven tool calls.
 
-AUTH: calling a deployed AgentCore runtime requires a bearer token plus the AgentCore
-session header. Tokens are pass-through for now (see ``agents/shared/auth.py``): the
-orchestrator reuses the JWT its own caller presented (or ``A2A_BEARER_TOKEN`` as a
-manual override). Local/docker calls have no incoming token and go out
-unauthenticated, unchanged.
+AUTH: deployed calls go through the Jarvis registry proxy (``REGISTRY_URL``) with a
+static Entra ID bearer token from env or Secrets Manager, falling back to passthrough
+of the caller's own JWT — see ``agents/shared/auth.py`` for the resolution order. The
+registry handles downstream AgentCore auth (runtime JWT minting, session headers).
+Local/docker calls have no token configured and go out unauthenticated, unchanged.
 """
 
 from __future__ import annotations
@@ -27,6 +27,26 @@ from agents.shared.auth import get_bearer_token
 
 # AgentCore requires a session id (>= 33 chars) on every InvokeAgentRuntime request.
 _SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class PinnedEndpointA2AAgent(A2AAgent):
+    """A2AAgent that sends messages to the resolved endpoint, ignoring ``card.url``.
+
+    Per the A2A spec, clients send messages to the agent card's ``url``, using the
+    configured endpoint only to fetch the card. That behavior breaks proxying: a card
+    fetched through the Jarvis registry proxy still carries the agent's direct
+    (AgentCore) URL, so a spec-default client would bypass the registry — and fail
+    auth — on every message. It is also the root of the historical self-recursion
+    trap (a ``localhost`` card URL calling itself). We resolve every endpoint
+    deliberately in ``agent_service_url``, so pin the card to it unconditionally.
+    """
+
+    async def get_agent_card(self):
+        card = await super().get_agent_card()
+        if str(card.url).rstrip("/") != self.endpoint.rstrip("/"):
+            card = card.model_copy(update={"url": f"{self.endpoint.rstrip('/')}/"})
+            self._agent_card = card
+        return card
 
 
 def _auth_client_config() -> ClientConfig | None:
@@ -51,7 +71,7 @@ async def call_agent_text(agent_id: str, prompt: str) -> str:
     """
     client_config = _auth_client_config()
     kwargs = {"client_config": client_config} if client_config is not None else {}
-    agent = A2AAgent(endpoint=agent_service_url(agent_id), name=agent_id, **kwargs)
+    agent = PinnedEndpointA2AAgent(endpoint=agent_service_url(agent_id), name=agent_id, **kwargs)
     result = await agent.invoke_async(prompt)
     blocks = result.message.get("content", [])
     return "".join(b["text"] for b in blocks if isinstance(b, dict) and "text" in b)

@@ -23,31 +23,44 @@ cdk deploy JarvisAgentsBase
 
 # 2. CI builds & pushes the image  ->  <repo>:<git-sha>  (.github/workflows/ci-ecr.yml)
 
-# 3. Runtimes, pointing at that image tag
+# 3. Create the shared Entra token secret (once; rotate by re-putting the value)
+aws secretsmanager create-secret --name jarvis/a2a-entra-token \
+  --secret-string '{"token":"<ENTRA_ID_ACCESS_TOKEN>"}'
+
+# 4. Runtimes, pointing at that image tag and the Jarvis registry
 cdk deploy JarvisAgentsRuntime \
   -c imageTag=<git-sha> \
   -c model=<bedrock-model-id-or-inference-profile-arn> \
   -c tavilyMcpUrl=<tavily-mcp-url> \
-  -c jwtDiscoveryUrl=https://login.microsoftonline.com/<TENANT_ID>/v2.0/.well-known/openid-configuration \
-  -c jwtAllowedAudience=api://<your-api-app-id> \
-  -c jwtAllowedClients=<frontend-client-id>
+  -c registryUrl=https://jarvis.ascendingdc.com \
+  -c tokenSecretArn=<arn-of-jarvis/a2a-entra-token> \
+  -c jwtAllowedAudience=<audience-from-registry-runtimeAccess-config>
 ```
 
 ## Auth
 
-- **Inbound** (`jwt*` context): every runtime gets a `customJWTAuthorizer` built from
-  `jwtDiscoveryUrl` / `jwtAllowedAudience` / `jwtAllowedClients` — AgentCore uses the
-  discovery URL only to fetch signing keys and validate/decode the caller's JWT. Omit
-  `jwtDiscoveryUrl` entirely → runtimes default to IAM SigV4.
-- **Inter-agent** is bearer-token **passthrough** (`agents/shared/auth.py`): the platform
-  frontend obtains the JWT and invokes `deep_intel` with it; the orchestrator reuses that
-  same token when calling the worker runtimes, and the workers validate it against the
-  same discovery URL. No OAuth client config, secret, or extra CDK context is needed —
-  just make sure the token's audience/client passes the same `jwt*` values on the
-  workers. For smoke-testing without the frontend, `A2A_BEARER_TOKEN` can be set on the
-  orchestrator's env as a manual token override.
-- **Later**: replace passthrough with a machine (client-credentials) OAuth flow so
-  orchestrations aren't bounded by the frontend token's lifetime.
+The agents sit behind the **Jarvis registry** (https://jarvis.ascendingdc.com); all
+deployed A2A traffic flows through its proxy.
+
+- **Inbound to runtimes** (`jwt*` context): every runtime gets a `customJWTAuthorizer`.
+  `jwtDiscoveryUrl` defaults to the registry auth-server
+  (`https://jarvis.ascendingdc.com/.well-known/openid-configuration`) — runtimes accept
+  the short-lived JWTs the registry mints when proxying calls to them. You must supply
+  `jwtAllowedAudience` and/or `jwtAllowedClients` matching the registry's
+  `runtimeAccess` config for these agents. `-c jwtDiscoveryUrl=none` disables JWT and
+  falls back to IAM SigV4 (note: the registry cannot live-invoke IAM-only A2A runtimes).
+- **Outbound to the registry** (`registryUrl` + `tokenSecretArn` context): all three
+  runtimes get `REGISTRY_URL` and `A2A_TOKEN_SECRET_ARN` env vars plus
+  `secretsmanager:GetSecretValue` on the token secret. `agents/shared/auth.py` reads a
+  **static Entra ID token** from that secret (TTL-cached ~5 min, so rotation is picked
+  up without restarts) and attaches it to registry-proxied calls. `A2A_BEARER_TOKEN`
+  env overrides it for smoke tests; with neither set, the agent falls back to
+  passing through its own caller's JWT.
+- **Registration**: the agents must exist in the registry (path = `AGENT_ID`, or set
+  `<AGENT_ID>_REGISTRY_PATH`). Use the registry's AgentCore federation sync, or
+  `POST /api/v1/agents` manually.
+- **Later**: replace the static token with a machine (client-credentials) OAuth flow so
+  tokens don't need manual rotation.
 
 Workers are created before the orchestrator; their runtime ARNs are injected into
 `deep_intel`'s env (`AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN`) and granted
@@ -62,6 +75,6 @@ aws bedrock-agentcore-control update-agent-runtime --agent-runtime-id <id> ...
 you want the rollout tracked in IaC.
 
 ## Not yet wired
-- **Machine OAuth**: inter-agent auth is currently token passthrough (see Auth above);
-  a client-credentials flow should eventually replace it.
+- **Machine OAuth**: inter-agent auth currently uses a static, manually-rotated Entra
+  token (see Auth above); a client-credentials flow should eventually replace it.
 - **Secrets** (`TAVILY_MCP_TOKEN`): move to Secrets Manager rather than plain env.

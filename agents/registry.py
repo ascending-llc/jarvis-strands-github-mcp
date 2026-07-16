@@ -121,20 +121,40 @@ def _agentcore_invocation_url(runtime_arn: str) -> str:
     )
 
 
+def _registry_proxy_url(agent_id: str) -> Optional[str]:
+    """Build the Jarvis registry A2A proxy URL for an agent, or None if no registry is set.
+
+    The registry proxies standard A2A at ``{REGISTRY_URL}/api/v1/proxy/a2a/{path}``:
+    it looks up the agent by its registry ``path`` slug, enforces ACLs, mints the
+    downstream AgentCore runtime JWT, and forwards the unchanged A2A request. The
+    path defaults to the agent id; override per agent with ``<AGENT_ID>_REGISTRY_PATH``
+    if it was registered under a different slug.
+    """
+    registry_url = os.getenv("REGISTRY_URL")
+    if not registry_url:
+        return None
+    path = os.getenv(f"{agent_id.upper()}_REGISTRY_PATH", agent_id)
+    return f"{registry_url.rstrip('/')}/api/v1/proxy/a2a/{quote(path, safe='')}"
+
+
 def agent_service_url(agent_id: str) -> str:
     """Resolve a target agent's base URL.
 
-    Precedence: explicit URL env (local/docker-compose) → AgentCore runtime ARN env
-    (deployed). A centralized discovery registry can later replace this lookup.
+    Precedence: explicit URL env (local/docker-compose) → Jarvis registry proxy
+    (``REGISTRY_URL``, deployed) → AgentCore runtime ARN env (deployed, direct).
     """
     spec = AGENT_REGISTRY.get(agent_id)
     if spec and spec.url_env:
         url = os.getenv(spec.url_env)
         if url:
             return url.rstrip("/")
+    if spec:
+        registry_url = _registry_proxy_url(agent_id)
+        if registry_url:
+            return registry_url
     if spec and spec.arn_env:
         arn = os.getenv(spec.arn_env)
         if arn:
             return _agentcore_invocation_url(arn)
-    hints = [e for e in (spec.url_env, spec.arn_env) if spec and e]
-    raise ValueError(f"Missing endpoint for agent: {agent_id} (set one of {hints or '?'})")
+    hints = [e for e in (spec.url_env, spec.arn_env) if spec and e] + ["REGISTRY_URL"]
+    raise ValueError(f"Missing endpoint for agent: {agent_id} (set one of {hints})")

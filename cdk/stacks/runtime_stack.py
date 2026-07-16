@@ -46,6 +46,13 @@ class RuntimeStack(cdk.Stack):
             # AgentCore container FS is ephemeral; /tmp is writable. Real output goes to S3.
             "REPORT_OUTPUT_DIR": "/tmp/reports",
         }
+        # Inter-agent calls route through the Jarvis registry A2A proxy, authenticated
+        # with a static Entra ID token in Secrets Manager (read at runtime, TTL-cached).
+        self.token_secret_arn = ctx("tokenSecretArn")
+        if ctx("registryUrl"):
+            self.common_env["REGISTRY_URL"] = ctx("registryUrl")
+        if self.token_secret_arn:
+            self.common_env["A2A_TOKEN_SECRET_ARN"] = self.token_secret_arn
         # TODO(secrets): move TAVILY_MCP_TOKEN to Secrets Manager rather than plain env.
 
         self._authorizer = self._build_jwt_authorizer()
@@ -156,17 +163,34 @@ class RuntimeStack(cdk.Stack):
         if allow_reports_write:
             self.reports_bucket.grant_write(role)
 
+        # Every agent reads the shared Entra token secret for registry calls. Secrets
+        # Manager ARNs carry a random 6-char suffix; grant both forms so a suffix-less
+        # name also works.
+        if self.token_secret_arn:
+            role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["secretsmanager:GetSecretValue"],
+                    resources=[self.token_secret_arn, f"{self.token_secret_arn}-??????"],
+                )
+            )
+
         return role
 
-    def _build_jwt_authorizer(self):
-        """Inbound JWT authorizer (Entra/your IdP). Returns None → defaults to IAM SigV4.
+    # The Jarvis registry's auth-server: runtimes validate the short-lived JWTs the
+    # registry mints for downstream calls against this issuer's signing keys.
+    DEFAULT_JWT_DISCOVERY_URL = "https://jarvis.ascendingdc.com/.well-known/openid-configuration"
 
-        Provide via `cdk deploy -c jwtDiscoveryUrl=... -c jwtAllowedAudience=... -c
-        jwtAllowedClients=...`. Discovery URL must end in /.well-known/openid-configuration.
+    def _build_jwt_authorizer(self):
+        """Inbound JWT authorizer. Defaults to the Jarvis registry auth-server issuer.
+
+        Override via `cdk deploy -c jwtDiscoveryUrl=... -c jwtAllowedAudience=... -c
+        jwtAllowedClients=...` (audience/clients must match the registry's runtimeAccess
+        config for these agents). Pass `-c jwtDiscoveryUrl=none` to disable JWT auth
+        entirely and fall back to IAM SigV4.
         """
         ctx = self.node.try_get_context
-        discovery_url = ctx("jwtDiscoveryUrl")
-        if not discovery_url:
+        discovery_url = ctx("jwtDiscoveryUrl") or self.DEFAULT_JWT_DISCOVERY_URL
+        if discovery_url.lower() == "none":
             return None
 
         def _as_list(val):
@@ -174,10 +198,19 @@ class RuntimeStack(cdk.Stack):
                 return None
             return val if isinstance(val, list) else [val]
 
+        audience = _as_list(ctx("jwtAllowedAudience"))
+        clients = _as_list(ctx("jwtAllowedClients"))
+        if not audience and not clients:
+            raise ValueError(
+                "JWT authorizer needs at least one of -c jwtAllowedAudience=... / "
+                "-c jwtAllowedClients=... (values must match the registry's runtimeAccess "
+                "config for these agents), or -c jwtDiscoveryUrl=none for IAM SigV4."
+            )
+
         return agentcore.CfnRuntime.AuthorizerConfigurationProperty(
             custom_jwt_authorizer=agentcore.CfnRuntime.CustomJWTAuthorizerConfigurationProperty(
                 discovery_url=discovery_url,
-                allowed_audience=_as_list(ctx("jwtAllowedAudience")),
-                allowed_clients=_as_list(ctx("jwtAllowedClients")),
+                allowed_audience=audience,
+                allowed_clients=clients,
             )
         )
