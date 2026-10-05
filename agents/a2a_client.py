@@ -19,7 +19,7 @@ import os
 from uuid import uuid4
 
 import httpx
-from a2a.client import ClientConfig
+from a2a.client import A2ACardResolver, ClientConfig
 from strands.agent import A2AAgent
 
 from agents.registry import agent_service_url
@@ -27,6 +27,12 @@ from agents.shared.auth import get_bearer_token
 
 # AgentCore requires a session id (>= 33 chars) on every InvokeAgentRuntime request.
 _SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+# The Jarvis registry's ingress blocks any path with a dot-segment (e.g. ``.well-known``),
+# which is the A2A spec's default card path. The registry serves the identical card at this
+# dot-free alias instead, scoped to its own proxy routes only (``/proxy/a2a/{agent_path}``).
+_REGISTRY_PROXY_MARKER = "/proxy/a2a/"
+_REGISTRY_PROXY_CARD_PATH = "agent-card.json"
 
 
 class PinnedEndpointA2AAgent(A2AAgent):
@@ -42,10 +48,28 @@ class PinnedEndpointA2AAgent(A2AAgent):
     """
 
     async def get_agent_card(self):
-        card = await super().get_agent_card()
+        if self._agent_card is not None:
+            return self._agent_card
+
+        relative_card_path = _REGISTRY_PROXY_CARD_PATH if _REGISTRY_PROXY_MARKER in self.endpoint else None
+
+        if self._client_config is not None and self._client_config.httpx_client is not None:
+            resolver = A2ACardResolver(httpx_client=self._client_config.httpx_client, base_url=self.endpoint)
+            card = await resolver.get_agent_card(relative_card_path=relative_card_path)
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resolver = A2ACardResolver(httpx_client=client, base_url=self.endpoint)
+                card = await resolver.get_agent_card(relative_card_path=relative_card_path)
+
+        if self.name is None and card.name is not None:
+            self.name = card.name
+        if self.description is None and card.description is not None:
+            self.description = card.description
+
         if str(card.url).rstrip("/") != self.endpoint.rstrip("/"):
             card = card.model_copy(update={"url": f"{self.endpoint.rstrip('/')}/"})
-            self._agent_card = card
+
+        self._agent_card = card
         return card
 
 

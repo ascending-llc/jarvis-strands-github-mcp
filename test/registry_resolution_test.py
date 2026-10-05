@@ -57,9 +57,8 @@ def test_missing_everything_raises() -> None:
         agent_service_url("aws_research")
 
 
-def test_pinned_card_rewrites_url(monkeypatch) -> None:
-    proxy = "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
-    upstream_card = AgentCard(
+def _make_upstream_card() -> AgentCard:
+    return AgentCard(
         name="AWS Research Agent",
         description="d",
         url="https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn/invocations/",
@@ -70,14 +69,50 @@ def test_pinned_card_rewrites_url(monkeypatch) -> None:
         default_output_modes=["text"],
     )
 
-    async def fake_super_get_card(self):
+
+def test_pinned_card_rewrites_url(monkeypatch) -> None:
+    proxy = "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
+    upstream_card = _make_upstream_card()
+
+    async def fake_resolver_get_card(self, relative_card_path=None, http_kwargs=None, signature_verifier=None):
         return upstream_card
 
-    monkeypatch.setattr(
-        "strands.agent.A2AAgent.get_agent_card", fake_super_get_card
-    )
+    monkeypatch.setattr("agents.a2a_client.A2ACardResolver.get_agent_card", fake_resolver_get_card)
     agent = PinnedEndpointA2AAgent(endpoint=proxy, name="aws_research")
     card = asyncio.run(agent.get_agent_card())
     assert str(card.url) == f"{proxy}/"
     # The pinned card is cached, so message sending targets the proxy too.
     assert agent._agent_card is card
+
+
+def test_registry_proxy_card_fetch_uses_dot_free_path(monkeypatch) -> None:
+    """The registry's ingress blocks nested ``.well-known`` paths, so proxied card fetches
+    must use its dot-free ``agent-card.json`` alias instead of the A2A spec default."""
+    proxy = "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
+    upstream_card = _make_upstream_card()
+    seen_paths: list[str | None] = []
+
+    async def fake_resolver_get_card(self, relative_card_path=None, http_kwargs=None, signature_verifier=None):
+        seen_paths.append(relative_card_path)
+        return upstream_card
+
+    monkeypatch.setattr("agents.a2a_client.A2ACardResolver.get_agent_card", fake_resolver_get_card)
+    agent = PinnedEndpointA2AAgent(endpoint=proxy, name="aws_research")
+    asyncio.run(agent.get_agent_card())
+    assert seen_paths == ["agent-card.json"]
+
+
+def test_direct_endpoint_card_fetch_uses_spec_default_path(monkeypatch) -> None:
+    """A direct (non-registry) endpoint keeps the A2A spec default ``.well-known`` path."""
+    direct = "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn/invocations"
+    upstream_card = _make_upstream_card()
+    seen_paths: list[str | None] = []
+
+    async def fake_resolver_get_card(self, relative_card_path=None, http_kwargs=None, signature_verifier=None):
+        seen_paths.append(relative_card_path)
+        return upstream_card
+
+    monkeypatch.setattr("agents.a2a_client.A2ACardResolver.get_agent_card", fake_resolver_get_card)
+    agent = PinnedEndpointA2AAgent(endpoint=direct, name="aws_research")
+    asyncio.run(agent.get_agent_card())
+    assert seen_paths == [None]
