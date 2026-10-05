@@ -110,6 +110,7 @@ S3_BUCKET=your-reports-bucket
 | `REPORT_OUTPUT_DIR` | ❌ | `reports` | Local output directory |
 | `S3_BUCKET` | ❌ | — | Enables S3 upload when set |
 | `S3_PREFIX` | ❌ | `aws-intel-reports` | S3 key prefix |
+| `S3_PRESIGNED_URL_EXPIRY` | ❌ | `86400` | Seconds the report's presigned URL stays valid (bucket stays private; no public read needed) |
 | `ORCHESTRATOR_LOG_LEVEL` | ❌ | `INFO` | `DEBUG` surfaces tool inputs/results |
 | `ORCHESTRATOR_LOG_FILE` | ❌ | `orchestrator.log` | Log file path |
 | `PORT` | ❌ | `9000` | Local port override |

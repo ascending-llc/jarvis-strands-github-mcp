@@ -188,7 +188,10 @@ class RuntimeStack(cdk.Stack):
             )
 
         if allow_reports_write:
-            self.reports_bucket.grant_write(role)
+            # Read is required too: the report URL returned to callers is an S3 presigned
+            # URL (the bucket has no public read), and a presigned URL is only honored by S3
+            # if the credentials that signed it actually have GetObject on the key.
+            self.reports_bucket.grant_read_write(role)
 
         # Each agent reads its own registry-token secret for outbound A2A calls.
         if self.token_prefix:
