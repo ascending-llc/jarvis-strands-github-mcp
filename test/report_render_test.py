@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agents.deep_intel.reporting import render_report
+from agents.deep_intel.reporting import render_report, upload_report_if_configured
 from agents.shared.schemas import (
     ReportContent,
     ReportOpportunity,
@@ -64,6 +64,39 @@ def test_render_report_omits_optional_sections() -> None:
     html = render_report(content)
     assert "Data Availability Notice" not in html
     assert '<section id="sources">' not in html
+
+
+def test_upload_report_if_configured_returns_presigned_url(monkeypatch) -> None:
+    """The reports bucket is private — uploads must return a presigned URL, not a static
+    path-style URL that would require the bucket (or object) to be publicly readable."""
+    from agents.deep_intel import reporting
+
+    calls: dict = {}
+
+    class FakeS3Client:
+        def upload_file(self, filename, bucket, key, ExtraArgs=None):
+            calls["upload"] = (filename, bucket, key, ExtraArgs)
+
+        def generate_presigned_url(self, operation, Params=None, ExpiresIn=None):
+            calls["presign"] = (operation, Params, ExpiresIn)
+            return "https://example-bucket.s3.amazonaws.com/signed?X-Amz-Signature=abc"
+
+    monkeypatch.setattr(reporting.boto3, "client", lambda *a, **k: FakeS3Client())
+
+    class FakeConfig:
+        s3_bucket = "example-bucket"
+        s3_prefix = "aws-intel-reports"
+        aws_region = "us-east-1"
+        s3_presigned_url_expiry = 3600
+
+    url = upload_report_if_configured("/tmp/report.html", FakeConfig())
+
+    assert url == "https://example-bucket.s3.amazonaws.com/signed?X-Amz-Signature=abc"
+    assert calls["presign"] == (
+        "get_object",
+        {"Bucket": "example-bucket", "Key": "aws-intel-reports/report.html"},
+        3600,
+    )
 
 
 def test_save_report_tool_accepts_raw_dict_input(tmp_path, monkeypatch) -> None:

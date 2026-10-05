@@ -1,0 +1,37 @@
+# Deploy configuration. Select a section with `cdk deploy -c env=dev` (default: dev).
+#
+# One rule: everything is INFRA (what CDK builds with) except the [<env>.env] block,
+# which is injected verbatim into every container as its runtime environment.
+#
+# Account-specific values (real ARNs) go in the gitignored cdk/config.local.toml, which
+# deep-merges over this file. Secrets never live here — only the Secrets Manager name
+# prefix (token_secret_prefix); the token values are stored in Secrets Manager.
+
+[dev]
+# infra: what CDK builds
+image_tag = "latest"                       # CI passes the git sha via -c imageTag=<sha>
+token_secret_prefix = "agentcore"          # each agent reads {prefix}/{agent_id}
+jarvis_environment = "demo"                # tags every runtime; registry federation filters by this
+jwt_discovery_url = "https://jarvis-demo.ascendingdc.com/.well-known/openid-configuration"
+jwt_allowed_audience = ["jarvis-managed-agents"]
+# jwt_allowed_clients = []                  # optional; jwt_discovery_url = "none" → IAM SigV4
+
+[dev.env]
+# app env vars, injected into every container. MODEL + TAVILY_MCP_URL are required by
+# load_config() at startup; set those account-specific values in config.local.toml.
+MODEL = ""
+TAVILY_MCP_URL = ""
+REGISTRY_URL = "https://jarvis-demo.ascendingdc.com"
+
+[prod]
+# infra
+image_tag = "latest"
+token_secret_prefix = "agentcore"
+jarvis_environment = "prod"
+jwt_discovery_url = "https://jarvis.ascendingdc.com/.well-known/openid-configuration"
+jwt_allowed_audience = ["jarvis-services"]
+
+[prod.env]
+MODEL = ""
+TAVILY_MCP_URL = ""
+REGISTRY_URL = "https://jarvis.ascendingdc.com"

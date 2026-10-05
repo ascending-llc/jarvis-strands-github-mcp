@@ -110,12 +110,17 @@ S3_BUCKET=your-reports-bucket
 | `REPORT_OUTPUT_DIR` | ❌ | `reports` | Local output directory |
 | `S3_BUCKET` | ❌ | — | Enables S3 upload when set |
 | `S3_PREFIX` | ❌ | `aws-intel-reports` | S3 key prefix |
+| `S3_PRESIGNED_URL_EXPIRY` | ❌ | `86400` | Seconds the report's presigned URL stays valid (bucket stays private; no public read needed) |
 | `ORCHESTRATOR_LOG_LEVEL` | ❌ | `INFO` | `DEBUG` surfaces tool inputs/results |
 | `ORCHESTRATOR_LOG_FILE` | ❌ | `orchestrator.log` | Log file path |
 | `PORT` | ❌ | `9000` | Local port override |
 | `AGENT_BASE_URL` | ⚠️ | `http://localhost:<PORT>` | URL **other agents** use to reach this one — advertised in the agent card. Set per-service (compose does this); never set globally |
-| `DEEP_INTEL_URL` / `AWS_RESEARCH_URL` / `BUSINESS_INTEL_URL` | ❌ | — | Explicit peer URLs (local/docker discovery) |
-| `AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN` | ❌ | — | AgentCore runtime ARNs (deployed discovery fallback) |
+| `DEEP_INTEL_URL` / `AWS_RESEARCH_URL` / `BUSINESS_INTEL_URL` | ❌ | — | Explicit peer URLs (local/docker discovery, highest precedence) |
+| `REGISTRY_URL` | ❌ | — | Jarvis registry base URL; peers resolve to `{REGISTRY_URL}/gateway/proxy/a2a/{path}` (deployed discovery) |
+| `<AGENT_ID>_REGISTRY_PATH` | ❌ | agent id | Registry path slug override per agent (e.g. `AWS_RESEARCH_REGISTRY_PATH`) |
+| `AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN` | ❌ | — | AgentCore runtime ARNs (direct-call fallback when no registry) |
+| `A2A_BEARER_TOKEN` | ❌ | — | Static bearer token for outbound A2A calls (highest auth precedence) |
+| `A2A_TOKEN_SECRET_ARN` | ❌ | — | Secrets Manager secret (per agent, e.g. `agentcore/deep_intel`) holding the Entra ID token (raw or `{"token": ...}`), TTL-cached ~5 min |
 
 </details>
 
@@ -213,7 +218,7 @@ docker-compose.yml               # Three agent services (host ports 9001-9003)
 agents/
 ├── server.py                    # Entrypoint: AGENT_ID → registry spec → serve_a2a (port 9000)
 ├── registry.py                  # ⭐ Source of truth: agent specs, schemas, skills, MCP servers, discovery
-├── a2a_client.py                # Thin A2A client for parallel worker calls (+ deferred auth seam)
+├── a2a_client.py                # Thin A2A client for parallel worker calls (+ bearer passthrough)
 ├── deep_intel/
 │   ├── orchestrator.py          # Orchestrator agent: gather_research + save_report tools
 │   └── reporting.py             # Jinja2 rendering, disk storage, optional S3 upload
@@ -256,8 +261,10 @@ Covers the worker→orchestrator typed contract (`_coerce`), the report renderer
 
 ## 🗺️ Roadmap
 
-- [ ] **Inter-agent auth for deployed runtimes** — machine OAuth (client-credentials) in `a2a_client.py:_auth_token`; deployed orchestrator→worker calls 403 until wired
-- [ ] **Secrets hygiene** — move `TAVILY_MCP_TOKEN` / OAuth client secret to AWS Secrets Manager
+- [x] **Registry-based discovery & invocation** — deployed inter-agent calls route through the Jarvis registry A2A proxy (`REGISTRY_URL`), replacing hard-coded runtime ARNs
+- [x] **Inter-agent auth for deployed runtimes** — static Entra ID token from env/Secrets Manager (`agents/shared/auth.py`), with caller-JWT passthrough as fallback
+- [ ] **Machine OAuth (client-credentials)** — replace the manually-rotated static token
+- [ ] **Secrets hygiene** — move `TAVILY_MCP_TOKEN` to AWS Secrets Manager
 - [ ] **Tool-error observability** — WARNING-level hook for failed tool calls
 - [ ] **Persistent task store** — tasks are in-memory today and don't survive restarts
 

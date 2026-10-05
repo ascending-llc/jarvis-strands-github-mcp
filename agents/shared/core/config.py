@@ -42,6 +42,7 @@ class AppConfig:
     aws_region: str
     s3_bucket: Optional[str]
     s3_prefix: str
+    s3_presigned_url_expiry: int
 
     def __post_init__(self) -> None:
         try:
@@ -73,6 +74,7 @@ def load_config() -> AppConfig:
             aws_region=os.getenv("AWS_REGION", "us-east-1"),
             s3_bucket=os.getenv("S3_BUCKET"),
             s3_prefix=os.getenv("S3_PREFIX", "aws-intel-reports"),
+            s3_presigned_url_expiry=int(os.getenv("S3_PRESIGNED_URL_EXPIRY", "86400")),
         )
         logger.info("Configuration loaded successfully")
         return config

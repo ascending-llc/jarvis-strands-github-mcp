@@ -46,8 +46,13 @@ def upload_report_if_configured(html_path: Optional[str], config: Any) -> Option
         s3_key,
         ExtraArgs={"ContentType": "text/html"},
     )
-    region = config.aws_region
-    return f"https://{config.s3_bucket}.s3.{region}.amazonaws.com/{s3_key}"
+    # The reports bucket is private (no public read) — a presigned URL grants time-limited
+    # access to this one object instead of requiring the bucket itself to be public.
+    return s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": config.s3_bucket, "Key": s3_key},
+        ExpiresIn=config.s3_presigned_url_expiry,
+    )
 
 
 def store_html_report(html_report: str, company_name: str | None = None) -> tuple[str, str | None, str | None]:

@@ -12,3 +12,4 @@ build/
 .DS_Store
 cdk.out/
 cdk/cdk.out/
+cdk/config.local.toml

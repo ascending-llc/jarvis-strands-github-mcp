@@ -3,7 +3,8 @@
 Workers are created first so the orchestrator can reference their runtime ARNs (injected
 as env vars + granted InvokeAgentRuntime). All three use the same container image; only
 AGENT_ID (and the orchestrator's extra wiring) differs — the docker-compose model lifted
-to AgentCore.
+to AgentCore. All deploy values come from cdk/config.toml (see stacks/deploy_config.py);
+-c flags override per deploy.
 """
 
 from __future__ import annotations
@@ -28,26 +29,25 @@ class RuntimeStack(cdk.Stack):
         *,
         repository: ecr.IRepository,
         reports_bucket: s3.IBucket,
-        image_tag: str,
+        config: dict,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.container_uri = repository.repository_uri_for_tag(image_tag)
+        self.config = config
+        self.token_prefix = config.get("token_secret_prefix")
+        self.container_uri = repository.repository_uri_for_tag(config.get("image_tag", "latest"))
         self.reports_bucket = reports_bucket
 
-        # --- shared runtime config (set real values via `cdk deploy -c key=value`) ---
-        ctx = self.node.try_get_context
+        # App env vars come verbatim from config.toml [<env>.env] (MODEL, TAVILY_MCP_URL,
+        # REGISTRY_URL, ...). CDK layers on the few values only it knows; AGENT_ID and
+        # the per-agent A2A_TOKEN_SECRET_ARN are added per runtime in _make_runtime.
         self.common_env = {
-            # MODEL and TAVILY_MCP_URL are required by load_config() at container startup.
-            "MODEL": ctx("model") or "REPLACE_WITH_BEDROCK_MODEL_ID",
-            "TAVILY_MCP_URL": ctx("tavilyMcpUrl") or "REPLACE_WITH_TAVILY_MCP_URL",
+            **config.get("env", {}),
             "AWS_REGION": self.region,
             # AgentCore container FS is ephemeral; /tmp is writable. Real output goes to S3.
             "REPORT_OUTPUT_DIR": "/tmp/reports",
         }
-        # TODO(secrets): move TAVILY_MCP_TOKEN and the machine-OAuth client secret to
-        # Secrets Manager and inject/read them at runtime rather than as plain env.
 
         self._authorizer = self._build_jwt_authorizer()
 
@@ -62,6 +62,10 @@ class RuntimeStack(cdk.Stack):
         orch_env["AWS_RESEARCH_AGENT_ARN"] = worker_runtimes["aws_research"].attr_agent_runtime_arn
         orch_env["BUSINESS_INTEL_AGENT_ARN"] = worker_runtimes["business_intel"].attr_agent_runtime_arn
         orch_env["S3_BUCKET"] = reports_bucket.bucket_name
+        # Both workers are registered in the Jarvis registry under hyphenated slugs,
+        # not the AGENT_ID itself.
+        orch_env["BUSINESS_INTEL_REGISTRY_PATH"] = "business-intel"
+        orch_env["AWS_RESEARCH_REGISTRY_PATH"] = "aws-research"
 
         self._make_runtime(
             ORCHESTRATOR_ID,
@@ -82,6 +86,8 @@ class RuntimeStack(cdk.Stack):
     ) -> agentcore.CfnRuntime:
         role = self._make_execution_role(agent_id, invoke_runtime_arns, allow_reports_write)
         env = {**env, "AGENT_ID": agent_id}
+        if self.token_prefix:
+            env["A2A_TOKEN_SECRET_ARN"] = f"{self.token_prefix}/{agent_id}"
 
         runtime = agentcore.CfnRuntime(
             self,
@@ -99,10 +105,40 @@ class RuntimeStack(cdk.Stack):
             role_arn=role.role_arn,
             environment_variables=env,
             authorizer_configuration=self._authorizer,
+            tags=self._runtime_tags(),
         )
+        # CloudFormation only infers a dependency on the Role resource from role_arn,
+        # not on the separate AWS::IAM::Policy resource that role.add_to_policy(...)
+        # lazily creates for its permissions (ECR pull, etc.) — a documented CDK gap
+        # (aws/aws-cdk#35845). Without this, the runtime can be created before its
+        # execution role's ECR permissions are actually attached, and AgentCore's
+        # image-pull validation fails with a misleading "Access denied" error.
+        runtime.node.add_dependency(role)
+        default_policy = role.node.try_find_child("DefaultPolicy")
+        if default_policy is not None:
+            runtime.node.add_dependency(default_policy)
 
         cdk.CfnOutput(self, f"Arn-{agent_id}", value=runtime.attr_agent_runtime_arn)
         return runtime
+
+    def _runtime_tags(self) -> dict[str, str] | None:
+        """Resource tags applied to every runtime (e.g. jarvis-environment for federation
+        discovery filtering). Set jarvis_environment in config.toml per environment."""
+        env_tag = self.config.get("jarvis_environment")
+        return {"jarvis-environment": env_tag} if env_tag else None
+
+    def _token_secret_resources(self, agent_id: str) -> list[str]:
+        """IAM resource ARNs for this agent's own token secret ("{prefix}/{agent_id}").
+
+        Secrets Manager appends a random 6-char suffix to secret ARNs, so grant both the
+        literal name and the `-??????` wildcard form. Scoped per agent — a runtime can
+        only ever read its own secret, never a sibling's.
+        """
+        arn = (
+            f"arn:{self.partition}:secretsmanager:{self.region}:{self.account}"
+            f":secret:{self.token_prefix}/{agent_id}"
+        )
+        return [arn, f"{arn}-??????"]
 
     def _make_execution_role(
         self,
@@ -152,31 +188,36 @@ class RuntimeStack(cdk.Stack):
             )
 
         if allow_reports_write:
-            self.reports_bucket.grant_write(role)
+            # Read is required too: the report URL returned to callers is an S3 presigned
+            # URL (the bucket has no public read), and a presigned URL is only honored by S3
+            # if the credentials that signed it actually have GetObject on the key.
+            self.reports_bucket.grant_read_write(role)
+
+        # Each agent reads its own registry-token secret for outbound A2A calls.
+        if self.token_prefix:
+            role.add_to_policy(
+                iam.PolicyStatement(
+                    actions=["secretsmanager:GetSecretValue"],
+                    resources=self._token_secret_resources(agent_id),
+                )
+            )
 
         return role
 
     def _build_jwt_authorizer(self):
-        """Inbound JWT authorizer (Entra/your IdP). Returns None → defaults to IAM SigV4.
+        """Inbound JWT authorizer from config.toml jwt_* keys (unset / "none" → IAM SigV4).
 
-        TODO(auth): copy these values from your existing AgentCore runtime. Provide via
-        `cdk deploy -c jwtDiscoveryUrl=... -c jwtAllowedAudience=... -c jwtAllowedClients=...`.
-        Discovery URL must end in /.well-known/openid-configuration.
+        The discovery URL must be the issuer of the tokens that actually reach the
+        runtimes — the Jarvis registry auth-server that proxies calls to them — and
+        audience/clients must match its runtimeAccess config for these agents.
         """
-        ctx = self.node.try_get_context
-        discovery_url = ctx("jwtDiscoveryUrl")
-        if not discovery_url:
+        discovery_url = self.config.get("jwt_discovery_url")
+        if not discovery_url or str(discovery_url).lower() == "none":
             return None
-
-        def _as_list(val):
-            if val is None:
-                return None
-            return val if isinstance(val, list) else [val]
-
         return agentcore.CfnRuntime.AuthorizerConfigurationProperty(
             custom_jwt_authorizer=agentcore.CfnRuntime.CustomJWTAuthorizerConfigurationProperty(
                 discovery_url=discovery_url,
-                allowed_audience=_as_list(ctx("jwtAllowedAudience")),
-                allowed_clients=_as_list(ctx("jwtAllowedClients")),
+                allowed_audience=self.config.get("jwt_allowed_audience") or None,
+                allowed_clients=self.config.get("jwt_allowed_clients") or None,
             )
         )

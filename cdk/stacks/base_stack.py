@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import aws_cdk as cdk
 from aws_cdk import aws_ecr as ecr
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
@@ -21,10 +22,27 @@ class BaseStack(cdk.Stack):
         self.repository = ecr.Repository(
             self,
             "AgentImage",
-            repository_name="jarvis/aws-intel-agent",
+            repository_name="agentcore/aws_deep_intel",
             image_tag_mutability=ecr.TagMutability.MUTABLE,
             image_scan_on_push=True,
             removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
+
+        # AgentCore validates pull access against the ECR repository policy at runtime
+        # creation time — an IAM policy on the execution role alone is not enough. Grant
+        # the service principal here, scoped to this account (matches the execution
+        # roles' own trust condition in runtime_stack.py).
+        self.repository.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="AllowAgentCorePull",
+                principals=[iam.ServicePrincipal("bedrock-agentcore.amazonaws.com")],
+                actions=[
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                ],
+                conditions={"StringEquals": {"aws:SourceAccount": self.account}},
+            )
         )
 
         # Reports sink (the AgentCore container FS is ephemeral — S3 is the real output).
