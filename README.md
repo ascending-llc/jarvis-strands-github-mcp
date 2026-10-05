@@ -115,7 +115,7 @@ S3_BUCKET=your-reports-bucket
 | `PORT` | ❌ | `9000` | Local port override |
 | `AGENT_BASE_URL` | ⚠️ | `http://localhost:<PORT>` | URL **other agents** use to reach this one — advertised in the agent card. Set per-service (compose does this); never set globally |
 | `DEEP_INTEL_URL` / `AWS_RESEARCH_URL` / `BUSINESS_INTEL_URL` | ❌ | — | Explicit peer URLs (local/docker discovery, highest precedence) |
-| `REGISTRY_URL` | ❌ | — | Jarvis registry base URL; peers resolve to `{REGISTRY_URL}/proxy/a2a/{path}` (deployed discovery) |
+| `REGISTRY_URL` | ❌ | — | Jarvis registry base URL; peers resolve to `{REGISTRY_URL}/gateway/proxy/a2a/{path}` (deployed discovery) |
 | `<AGENT_ID>_REGISTRY_PATH` | ❌ | agent id | Registry path slug override per agent (e.g. `AWS_RESEARCH_REGISTRY_PATH`) |
 | `AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN` | ❌ | — | AgentCore runtime ARNs (direct-call fallback when no registry) |
 | `A2A_BEARER_TOKEN` | ❌ | — | Static bearer token for outbound A2A calls (highest auth precedence) |

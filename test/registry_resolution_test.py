@@ -33,7 +33,7 @@ def test_registry_proxy_used_when_no_url_env(monkeypatch) -> None:
     monkeypatch.setenv("AWS_RESEARCH_AGENT_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
     assert (
         agent_service_url("aws_research")
-        == "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
+        == "https://jarvis.ascendingdc.com/gateway/proxy/a2a/aws_research"
     )
 
 
@@ -42,7 +42,7 @@ def test_registry_path_override(monkeypatch) -> None:
     monkeypatch.setenv("AWS_RESEARCH_REGISTRY_PATH", "aws-research-prod")
     assert (
         agent_service_url("aws_research")
-        == "https://jarvis.ascendingdc.com/proxy/a2a/aws-research-prod"
+        == "https://jarvis.ascendingdc.com/gateway/proxy/a2a/aws-research-prod"
     )
 
 
@@ -71,7 +71,7 @@ def _make_upstream_card() -> AgentCard:
 
 
 def test_pinned_card_rewrites_url(monkeypatch) -> None:
-    proxy = "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
+    proxy = "https://jarvis.ascendingdc.com/gateway/proxy/a2a/aws_research"
     upstream_card = _make_upstream_card()
 
     async def fake_resolver_get_card(self, relative_card_path=None, http_kwargs=None, signature_verifier=None):
@@ -88,7 +88,7 @@ def test_pinned_card_rewrites_url(monkeypatch) -> None:
 def test_registry_proxy_card_fetch_uses_dot_free_path(monkeypatch) -> None:
     """The registry's ingress blocks nested ``.well-known`` paths, so proxied card fetches
     must use its dot-free ``agent-card.json`` alias instead of the A2A spec default."""
-    proxy = "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
+    proxy = "https://jarvis.ascendingdc.com/gateway/proxy/a2a/aws_research"
     upstream_card = _make_upstream_card()
     seen_paths: list[str | None] = []
 

@@ -124,9 +124,15 @@ def _agentcore_invocation_url(runtime_arn: str) -> str:
 def _registry_proxy_url(agent_id: str) -> Optional[str]:
     """Build the Jarvis registry A2A proxy URL for an agent, or None if no registry is set.
 
-    The registry proxies standard A2A at ``{REGISTRY_URL}/proxy/a2a/{path}`` (the proxy
-    router is mounted at a bare ``/proxy`` prefix, unlike every other registry router,
-    which lives under ``/api/{version}``): it looks up the agent by its registry ``path``
+    The registry proxies standard A2A at ``{REGISTRY_URL}/gateway/proxy/a2a/{path}``.
+    The ``/gateway`` prefix isn't optional dressing: at the ingress level, ``REGISTRY_URL``
+    (e.g. ``jarvis-demo.ascendingdc.com``) routes to several different backends by path —
+    only requests under ``/gateway`` reach the registry's ``registry-frontend``/
+    ``registry-backend`` pair at all; anything else (including a bare ``/proxy/...``) falls
+    through to the main chat app's catch-all route instead. ``registry-frontend``'s own
+    nginx then strips ``/gateway`` before forwarding to the FastAPI backend, where the proxy
+    router is mounted at a bare ``/proxy`` prefix (unlike every other registry router, which
+    lives under ``/api/{version}``). The registry looks up the agent by its registry ``path``
     slug, enforces ACLs, mints the downstream AgentCore runtime JWT, and forwards the
     unchanged A2A request. The path defaults to the agent id; override per agent with
     ``<AGENT_ID>_REGISTRY_PATH`` if it was registered under a different slug.
@@ -135,7 +141,7 @@ def _registry_proxy_url(agent_id: str) -> Optional[str]:
     if not registry_url:
         return None
     path = os.getenv(f"{agent_id.upper()}_REGISTRY_PATH", agent_id)
-    return f"{registry_url.rstrip('/')}/proxy/a2a/{quote(path, safe='')}"
+    return f"{registry_url.rstrip('/')}/gateway/proxy/a2a/{quote(path, safe='')}"
 
 
 def agent_service_url(agent_id: str) -> str:
