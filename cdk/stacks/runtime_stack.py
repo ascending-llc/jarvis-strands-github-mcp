@@ -62,10 +62,10 @@ class RuntimeStack(cdk.Stack):
         orch_env["AWS_RESEARCH_AGENT_ARN"] = worker_runtimes["aws_research"].attr_agent_runtime_arn
         orch_env["BUSINESS_INTEL_AGENT_ARN"] = worker_runtimes["business_intel"].attr_agent_runtime_arn
         orch_env["S3_BUCKET"] = reports_bucket.bucket_name
-        # business_intel is registered in the Jarvis registry under a hyphenated slug
-        # (business-intel), not the AGENT_ID itself; aws_research isn't registered there
-        # at all yet, so no override exists for it.
+        # Both workers are registered in the Jarvis registry under hyphenated slugs,
+        # not the AGENT_ID itself.
         orch_env["BUSINESS_INTEL_REGISTRY_PATH"] = "business-intel"
+        orch_env["AWS_RESEARCH_REGISTRY_PATH"] = "aws-research"
 
         self._make_runtime(
             ORCHESTRATOR_ID,
