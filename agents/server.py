@@ -47,11 +47,19 @@ def build_executor(spec: AgentSpec, config) -> StrandsA2AExecutor:
     per-agent in the registry (``AgentSpec.mcp_servers``), not hardcoded by agent kind —
     any agent, worker or orchestrator, can opt into any MCP server this way. Each named
     server is started once per process and shared across contexts.
+
+    Don't call ``client.start()`` here: ``MCPClient.start()`` activates the session but
+    never sets ``_tool_provider_started``, which only ``load_tools()`` sets after calling
+    ``start()`` itself. Pre-starting leaves that flag permanently False, so every later
+    ``load_tools()`` call (one per request, via the Agent's tool registry) would see it
+    unset, call ``start()`` again, and deterministically fail with "the client session is
+    currently running" — on every single request, not just a race on the first one. Let
+    the first ``load_tools()`` call lazily start it instead; it sets the flag correctly,
+    and every later request sharing this object sees it already True.
     """
     mcp_tools = []
     for mcp_name in spec.mcp_servers:
         client = MCP_BUILDERS[mcp_name](config)
-        client.start()
         mcp_tools.append(client)
 
     if spec.kind == "orchestrator":
