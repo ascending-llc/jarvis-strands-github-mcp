@@ -33,7 +33,7 @@ def test_registry_proxy_used_when_no_url_env(monkeypatch) -> None:
     monkeypatch.setenv("AWS_RESEARCH_AGENT_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
     assert (
         agent_service_url("aws_research")
-        == "https://jarvis.ascendingdc.com/api/v1/proxy/a2a/aws_research"
+        == "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
     )
 
 
@@ -42,7 +42,7 @@ def test_registry_path_override(monkeypatch) -> None:
     monkeypatch.setenv("AWS_RESEARCH_REGISTRY_PATH", "aws-research-prod")
     assert (
         agent_service_url("aws_research")
-        == "https://jarvis.ascendingdc.com/api/v1/proxy/a2a/aws-research-prod"
+        == "https://jarvis.ascendingdc.com/proxy/a2a/aws-research-prod"
     )
 
 
@@ -58,7 +58,7 @@ def test_missing_everything_raises() -> None:
 
 
 def test_pinned_card_rewrites_url(monkeypatch) -> None:
-    proxy = "https://jarvis.ascendingdc.com/api/v1/proxy/a2a/aws_research"
+    proxy = "https://jarvis.ascendingdc.com/proxy/a2a/aws_research"
     upstream_card = AgentCard(
         name="AWS Research Agent",
         description="d",
