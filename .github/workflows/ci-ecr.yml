@@ -46,7 +46,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.SAAS_AWS_DEPLOY_ROLE_ARN }}
           role-session-name: github-actions-ecr
           aws-region: ${{ inputs.aws_region }}
 
@@ -81,7 +81,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.SAAS_AWS_DEPLOY_ROLE_ARN }}
           role-session-name: github-actions-cdk-deploy
           aws-region: ${{ inputs.aws_region }}
 
@@ -101,14 +101,20 @@ jobs:
       - name: Install CDK app dependencies
         run: pip install -r requirements.txt
 
-      # cdk/config.local.toml is gitignored (account-specific MODEL, TAVILY_MCP_URL, ARNs);
-      # CI materializes it from a single repo secret holding the whole file's contents.
+      # cdk/config.local.toml is gitignored (account-specific MODEL, TAVILY_MCP_URL); neither
+      # value is sensitive, so CI materializes it from plain repo variables (vars.*), matching
+      # jarvis-deployment's own convention (vars.AZURE_ACR_NAME etc.) rather than secrets.
       - name: Write config.local.toml
-        run: printf '%s\n' "${{ secrets.CDK_CONFIG_LOCAL_TOML }}" > config.local.toml
+        run: |
+          cat > config.local.toml <<EOF
+          [${{ inputs.env }}.env]
+          MODEL = "${{ vars.MODEL }}"
+          TAVILY_MCP_URL = "${{ vars.TAVILY_MCP_URL }}"
+          EOF
 
       - name: cdk deploy JarvisAgentsRuntime
         env:
-          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ inputs.aws_region }}
         run: |
           cdk deploy JarvisAgentsRuntime \

@@ -69,14 +69,19 @@ Everything after base infra is CI: **`.github/workflows/ci-ecr.yml`** is one
 `workflow_dispatch` with two jobs — `build_and_push` (buildx → ECR, tagged
 `:<git-sha>` and `:latest`) then `deploy` (`cdk deploy JarvisAgentsRuntime -c
 env=<dev|prod> -c imageTag=<git-sha>`), using the `env` dropdown input to pick
-`config.toml`'s section. The deploy job needs two things the build job doesn't:
+`config.toml`'s section. Both jobs assume **`secrets.SAAS_AWS_DEPLOY_ROLE_ARN`** —
+the same OIDC deploy role `jarvis-deployment`'s Terraform/Helm pipelines already use
+against this account — not a repo-specific role.
 
-- **`CDK_CONFIG_LOCAL_TOML`** repo secret — the full contents of the gitignored
-  `cdk/config.local.toml` (account-specific `MODEL`, `TAVILY_MCP_URL`, real ARNs),
-  written to disk at deploy time since `deploy_config.py` requires that file.
-- **`AWS_ACCOUNT_ID`** repo secret, and `AWS_DEPLOY_ROLE_ARN`'s IAM role needs CDK
-  deploy permissions on top of its ECR push scope — CloudFormation, IAM
-  create/pass-role, `bedrock-agentcore-control:*`, Secrets Manager, S3.
+`MODEL` and `TAVILY_MCP_URL` aren't sensitive (an inference-profile ARN and an
+internal Tavily proxy URL), so the deploy job writes `cdk/config.local.toml` from
+plain repo **variables** (`vars.MODEL`, `vars.TAVILY_MCP_URL`, `vars.AWS_ACCOUNT_ID`),
+matching `jarvis-deployment`'s own `vars.*`-for-non-sensitive-config convention —
+not a secret. `deploy_config.py` still requires that file to exist with both keys set
+for whichever `env` section you're deploying.
+On top of its ECR push scope, `SAAS_AWS_DEPLOY_ROLE_ARN`'s IAM role needs CDK deploy
+permissions for this stack specifically — CloudFormation, IAM create/pass-role,
+`bedrock-agentcore-control:*`, Secrets Manager, S3.
 
 Run it manually from scratch or against a one-off tag:
 
