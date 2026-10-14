@@ -1,4 +1,4 @@
-name: Build and Push to ECR
+name: Build, Push, and Deploy
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +17,14 @@ on:
         type: string
         required: true
         default: "Dockerfile"
+      env:
+        description: "cdk/config.toml section to deploy (dev or prod)"
+        type: choice
+        required: true
+        default: "dev"
+        options:
+          - dev
+          - prod
 
 permissions:
   id-token: write
@@ -26,6 +34,8 @@ jobs:
   build_and_push:
     name: Build and Push Image
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ github.sha }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -56,3 +66,52 @@ jobs:
             ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:${{ github.sha }}
             ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr_repository }}:latest
           provenance: false
+
+  deploy:
+    name: Deploy Runtime Stack
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cdk
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: github-actions-cdk-deploy
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CDK app dependencies
+        run: pip install -r requirements.txt
+
+      # cdk/config.local.toml is gitignored (account-specific MODEL, TAVILY_MCP_URL, ARNs);
+      # CI materializes it from a single repo secret holding the whole file's contents.
+      - name: Write config.local.toml
+        run: printf '%s\n' "${{ secrets.CDK_CONFIG_LOCAL_TOML }}" > config.local.toml
+
+      - name: cdk deploy JarvisAgentsRuntime
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ inputs.aws_region }}
+        run: |
+          cdk deploy JarvisAgentsRuntime \
+            -c env=${{ inputs.env }} \
+            -c imageTag=${{ needs.build_and_push.outputs.image_tag }} \
+            --require-approval never

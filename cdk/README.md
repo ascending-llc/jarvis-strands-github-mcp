@@ -56,13 +56,29 @@ Each runtime's execution role can only read its own secret — a compromised wor
 read the orchestrator's token or a sibling's.
 
 ## Deploy
+
 ```bash
-# 1. Base infra (creates the ECR repo so CI can push to it)
+# 1. Base infra, once (creates the ECR repo + reports bucket; rarely changes)
 cdk deploy JarvisAgentsBase
+```
 
-# 2. CI builds & pushes the image  ->  <repo>:<git-sha>  (.github/workflows/ci-ecr.yml)
+Everything after base infra is CI: **`.github/workflows/ci-ecr.yml`** is one
+`workflow_dispatch` with two jobs — `build_and_push` (buildx → ECR, tagged
+`:<git-sha>` and `:latest`) then `deploy` (`cdk deploy JarvisAgentsRuntime -c
+env=<dev|prod> -c imageTag=<git-sha>`), using the `env` dropdown input to pick
+`config.toml`'s section. The deploy job needs two things the build job doesn't:
 
-# 3. Runtimes, using config.toml's [dev] section (override anything with -c)
+- **`CDK_CONFIG_LOCAL_TOML`** repo secret — the full contents of the gitignored
+  `cdk/config.local.toml` (account-specific `MODEL`, `TAVILY_MCP_URL`, real ARNs),
+  written to disk at deploy time since `deploy_config.py` requires that file.
+- **`AWS_ACCOUNT_ID`** repo secret, and `AWS_DEPLOY_ROLE_ARN`'s IAM role needs CDK
+  deploy permissions on top of its ECR push scope — CloudFormation, IAM
+  create/pass-role, `bedrock-agentcore-control:*`, Secrets Manager, S3.
+
+Run it manually from scratch or against a one-off tag:
+
+```bash
+# Equivalent to what the deploy job runs, for local debugging:
 cdk deploy JarvisAgentsRuntime -c env=dev -c imageTag=<git-sha>
 ```
 
@@ -96,13 +112,10 @@ Workers are created before the orchestrator; their runtime ARNs are injected int
 `deep_intel`'s env (`AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN`) and granted
 via `bedrock-agentcore:InvokeAgentRuntime`.
 
-## Rolling a new image (decoupled, ECS-style)
-CDK is **not** redeployed for code changes. CI pushes a new image, then:
-```bash
-aws bedrock-agentcore-control update-agent-runtime --agent-runtime-id <id> ...
-```
-(the ECS `force-new-deployment` analog). Use `-c imageTag=<sha>` + `cdk deploy` only when
-you want the rollout tracked in IaC.
+## Rolling a new image
+Run the `.github/workflows/ci-ecr.yml` workflow_dispatch — its `deploy` job always goes
+through `cdk deploy -c imageTag=<sha>` (not a bare `update-agent-runtime` call), so
+`config.toml`/IAM/runtime config never silently drifts from what CI actually deployed.
 
 ## Not yet wired
 - **Machine OAuth**: inter-agent auth currently uses a static, manually-rotated Entra
