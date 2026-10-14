@@ -37,8 +37,11 @@ shape, deep-merged over `config.toml`. Pick the section with `-c env=dev` (defau
 (`-c jwtDiscoveryUrl=`, `-c jwtAllowedAudience=`, `-c jwtAllowedClients=`).
 
 CDK injects the values only it knows on top of `[env.env]`: `AWS_REGION`,
-`REPORT_OUTPUT_DIR`, `AGENT_ID`, each agent's `A2A_TOKEN_SECRET_ARN`, the orchestrator's
-worker ARNs, and `S3_BUCKET`.
+`REPORT_OUTPUT_DIR`, `AGENT_ID`, each agent's `A2A_TOKEN_SECRET_ARN`, and (for the
+synthesizer, `deep_intel`) `S3_BUCKET`. None of the three runtimes are wired to invoke
+each other directly — a Jarvis Registry workflow fans out to the two workers and feeds
+their outputs to `deep_intel`, so there's no InvokeAgentRuntime grant or worker-ARN env
+var between them here.
 
 ## Create the per-agent secrets (once; rotate by re-putting the value)
 
@@ -107,10 +110,6 @@ its proxy (`registry_url` in config.toml — demo: `jarvis-demo.ascendingdc.com`
   `POST /api/v1/agents` manually.
 - **Later**: replace the static token with a machine (client-credentials) OAuth flow so
   tokens don't need manual rotation.
-
-Workers are created before the orchestrator; their runtime ARNs are injected into
-`deep_intel`'s env (`AWS_RESEARCH_AGENT_ARN` / `BUSINESS_INTEL_AGENT_ARN`) and granted
-via `bedrock-agentcore:InvokeAgentRuntime`.
 
 ## Rolling a new image
 Run the `.github/workflows/ci-ecr.yml` workflow_dispatch — its `deploy` job always goes

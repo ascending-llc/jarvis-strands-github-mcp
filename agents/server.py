@@ -76,15 +76,13 @@ def build_executor(spec: AgentSpec, config) -> StrandsA2AExecutor:
                 tools=mcp_tools,
             )
 
-    # Streaming mode differs by kind:
-    # - orchestrator: A2A-compliant streaming ON — the client sees the report stream live.
-    # - workers: OFF (legacy mode). Workers return one structured-output JSON artifact;
-    #   in compliant mode any mid-loop narration streams into the artifact and the final
-    #   structured JSON is dropped (executor only includes str(result) when nothing was
-    #   streamed). Legacy mode sends narration as status updates and the artifact is
-    #   exactly the structured JSON.
-    streaming = spec.kind == "orchestrator"
-    return StrandsA2AExecutor(agent_factory=agent_factory, enable_a2a_compliant_streaming=streaming)
+    # A2A-compliant streaming is OFF for every agent (legacy mode): every agent here is
+    # called as a workflow node (by a Jarvis Registry workflow), not by a client watching
+    # live narration. In compliant mode any mid-loop narration streams into the artifact
+    # and the final answer is dropped (the executor only includes str(result) when nothing
+    # was streamed); legacy mode sends narration as status updates and the artifact is
+    # exactly the agent's final answer — which the workflow then uses as this node's output.
+    return StrandsA2AExecutor(agent_factory=agent_factory, enable_a2a_compliant_streaming=False)
 
 
 def _build_agent_card(spec: AgentSpec, port: int) -> AgentCard:

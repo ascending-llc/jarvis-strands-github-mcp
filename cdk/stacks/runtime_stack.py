@@ -1,10 +1,11 @@
 """Runtime stack: 3 AgentCore runtimes from one shared image, selected by AGENT_ID.
 
-Workers are created first so the orchestrator can reference their runtime ARNs (injected
-as env vars + granted InvokeAgentRuntime). All three use the same container image; only
-AGENT_ID (and the orchestrator's extra wiring) differs — the docker-compose model lifted
-to AgentCore. All deploy values come from cdk/config.toml (see stacks/deploy_config.py);
--c flags override per deploy.
+All three use the same container image; only AGENT_ID (and the synthesizer's S3 grant)
+differs — the docker-compose model lifted to AgentCore. None of the three call each other
+directly: a Jarvis Registry workflow fans out to the workers and feeds their outputs to the
+synthesizer (``deep_intel``), so there's no InvokeAgentRuntime wiring between runtimes here.
+All deploy values come from cdk/config.toml (see stacks/deploy_config.py); -c flags override
+per deploy.
 """
 
 from __future__ import annotations
@@ -51,26 +52,19 @@ class RuntimeStack(cdk.Stack):
 
         self._authorizer = self._build_jwt_authorizer()
 
-        # Workers first → capture their ARNs for the orchestrator.
-        worker_runtimes: dict[str, agentcore.CfnRuntime] = {}
+        # Workers: no longer called directly by the orchestrator runtime — a Jarvis
+        # Registry workflow fans out to them (and to the synthesizer below) itself.
         for agent_id in WORKER_IDS:
-            worker_runtimes[agent_id] = self._make_runtime(agent_id, env=dict(self.common_env))
+            self._make_runtime(agent_id, env=dict(self.common_env))
 
-        # Orchestrator: worker ARNs injected as env + InvokeAgentRuntime granted + S3 write.
-        worker_arns = [r.attr_agent_runtime_arn for r in worker_runtimes.values()]
-        orch_env = dict(self.common_env)
-        orch_env["AWS_RESEARCH_AGENT_ARN"] = worker_runtimes["aws_research"].attr_agent_runtime_arn
-        orch_env["BUSINESS_INTEL_AGENT_ARN"] = worker_runtimes["business_intel"].attr_agent_runtime_arn
-        orch_env["S3_BUCKET"] = reports_bucket.bucket_name
-        # Both workers are registered in the Jarvis registry under hyphenated slugs,
-        # not the AGENT_ID itself.
-        orch_env["BUSINESS_INTEL_REGISTRY_PATH"] = "business-intel"
-        orch_env["AWS_RESEARCH_REGISTRY_PATH"] = "aws-research"
+        # Synthesizer: only needs S3 write to save/presign the report; it no longer
+        # calls the workers, so no worker ARNs or InvokeAgentRuntime grant.
+        synth_env = dict(self.common_env)
+        synth_env["S3_BUCKET"] = reports_bucket.bucket_name
 
         self._make_runtime(
             ORCHESTRATOR_ID,
-            env=orch_env,
-            invoke_runtime_arns=worker_arns,
+            env=synth_env,
             allow_reports_write=True,
         )
 
@@ -81,10 +75,9 @@ class RuntimeStack(cdk.Stack):
         agent_id: str,
         *,
         env: dict,
-        invoke_runtime_arns: list[str] | None = None,
         allow_reports_write: bool = False,
     ) -> agentcore.CfnRuntime:
-        role = self._make_execution_role(agent_id, invoke_runtime_arns, allow_reports_write)
+        role = self._make_execution_role(agent_id, allow_reports_write)
         env = {**env, "AGENT_ID": agent_id}
         if self.token_prefix:
             env["A2A_TOKEN_SECRET_ARN"] = f"{self.token_prefix}/{agent_id}"
@@ -143,7 +136,6 @@ class RuntimeStack(cdk.Stack):
     def _make_execution_role(
         self,
         agent_id: str,
-        invoke_runtime_arns: list[str] | None,
         allow_reports_write: bool,
     ) -> iam.Role:
         role = iam.Role(
@@ -174,18 +166,6 @@ class RuntimeStack(cdk.Stack):
                 resources=["*"],
             )
         )
-
-        # Orchestrator → workers: InvokeAgentRuntime on the worker runtime ARNs (+ endpoints).
-        if invoke_runtime_arns:
-            resources = []
-            for arn in invoke_runtime_arns:
-                resources.extend([arn, f"{arn}/*"])
-            role.add_to_policy(
-                iam.PolicyStatement(
-                    actions=["bedrock-agentcore:InvokeAgentRuntime"],
-                    resources=resources,
-                )
-            )
 
         if allow_reports_write:
             # Read is required too: the report URL returned to callers is an S3 presigned

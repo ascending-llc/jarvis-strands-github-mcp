@@ -86,20 +86,3 @@ def test_passthrough_case_insensitive_and_raw_token() -> None:
     # HTTP/2 lowercases header names; also tolerate a value without the Bearer prefix.
     BedrockAgentCoreContext.set_request_headers({"authorization": "jwt-raw"})
     assert auth.get_bearer_token() == "jwt-raw"
-
-
-def test_client_config_attaches_token(monkeypatch) -> None:
-    from agents import a2a_client
-
-    monkeypatch.setenv("A2A_BEARER_TOKEN", "tok-abc")
-    config = a2a_client._auth_client_config()
-    assert config is not None
-    headers = config.httpx_client.headers
-    assert headers["Authorization"] == "Bearer tok-abc"
-    assert len(headers[a2a_client._SESSION_HEADER]) >= 33
-
-
-def test_client_config_none_when_unauthenticated() -> None:
-    from agents import a2a_client
-
-    assert a2a_client._auth_client_config() is None
