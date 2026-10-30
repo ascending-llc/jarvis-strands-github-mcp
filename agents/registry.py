@@ -50,7 +50,6 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
         kind="worker",
         skill_dir=SKILLS_DIR / "aws-opportunity-research",
         output_schema=AwsFindings,
-        mcp_servers=["tavily"],
         a2a_skills=[
             AgentSkill(
                 id="aws-opportunity-research",
@@ -69,7 +68,6 @@ AGENT_REGISTRY: dict[str, AgentSpec] = {
         kind="worker",
         skill_dir=SKILLS_DIR / "company-intelligence",
         output_schema=CompanyProfile,
-        mcp_servers=["tavily"],
         a2a_skills=[
             AgentSkill(
                 id="company-intelligence",
