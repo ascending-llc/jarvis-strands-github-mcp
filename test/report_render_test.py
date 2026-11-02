@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agents.deep_intel.reporting import render_report, upload_report_if_configured
 from agents.shared.schemas import (
+    CompanyProfileSection,
     ReportContent,
     ReportOpportunity,
     ReportRecommendation,
@@ -19,6 +20,13 @@ def _sample_content() -> ReportContent:
             SnapshotRow(attribute="Industry Vertical", value="Fintech", confidence="HIGH"),
             SnapshotRow(attribute="Employee Count", value="Unknown", confidence="LOW"),
         ],
+        company_profile=CompanyProfileSection(
+            market_position="Leader in payments; no GigaOm mention found.",
+            leadership=["Patrick Collison — CEO", "Rahul Patil — former CTO (successor unconfirmed)"],
+            technology=["Apache Kafka", "Amazon Managed Service for Prometheus"],
+            recent_developments=["Feb 2026: valued at $159B via tender offer"],
+            challenges=["Real-time analytics ops overhead <b>x</b>"],
+        ),
         data_notice="Research connectors returned limited data.",
         opportunities=[
             ReportOpportunity(
@@ -127,3 +135,33 @@ def test_save_report_tool_accepts_raw_dict_input(tmp_path, monkeypatch) -> None:
     saved = list(tmp_path.glob("*.html"))
     assert len(saved) == 1
     assert "Stripe, Inc." in saved[0].read_text()
+
+
+def test_render_report_includes_company_profile_section() -> None:
+    html = render_report(_sample_content())
+    assert '<section id="company-profile">' in html
+    for heading in ("Market Position", "Leadership", "Technology &amp; Cloud Footprint",
+                    "Recent Developments", "Potential Challenges"):
+        assert heading in html
+    assert "Patrick Collison — CEO" in html
+    assert "Rahul Patil — former CTO (successor unconfirmed)" in html
+    assert "Feb 2026: valued at $159B via tender offer" in html
+    assert "&lt;b&gt;x&lt;/b&gt;" in html  # autoescaped
+    assert html.index('id="company-profile"') < html.index('id="opportunities"')
+
+
+def test_render_report_omits_empty_company_profile() -> None:
+    content = _sample_content()
+    content.company_profile = None
+    assert 'id="company-profile"' not in render_report(content)
+    content.company_profile = CompanyProfileSection()
+    assert 'id="company-profile"' not in render_report(content)
+
+
+def test_render_report_company_profile_skips_empty_subsections() -> None:
+    content = _sample_content()
+    content.company_profile = CompanyProfileSection(leadership=["Jane Doe — CEO"])
+    html = render_report(content)
+    assert "Jane Doe — CEO" in html
+    assert "Recent Developments" not in html
+    assert "Potential Challenges" not in html

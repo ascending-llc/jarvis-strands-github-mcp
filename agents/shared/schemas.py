@@ -112,6 +112,22 @@ class ReportRecommendation(BaseModel):
     detail: str = Field(description="Concrete action and rationale")
 
 
+class CompanyProfileSection(BaseModel):
+    """Business Intel detail rendered as its own 'Company Profile' report section."""
+
+    market_position: str | None = Field(
+        default=None, description="Market standing, analyst mentions and awards, copied from Business Intel"
+    )
+    leadership: list[str] = Field(default_factory=list, description="Key people, 'Name — Title'")
+    technology: list[str] = Field(default_factory=list, description="Tech stack and cloud footprint items")
+    recent_developments: list[str] = Field(
+        default_factory=list, description="Funding, launches, partnerships, expansion (last ~18 months)"
+    )
+    challenges: list[str] = Field(
+        default_factory=list, description="Inferred business or technical challenges, with their evidence"
+    )
+
+
 class ReportContent(BaseModel):
     """Everything the LLM contributes to the HTML report — prose and data, no markup."""
 
@@ -120,6 +136,10 @@ class ReportContent(BaseModel):
         description="2-4 paragraph executive summary; separate paragraphs with blank lines"
     )
     snapshot: list[SnapshotRow] = Field(default_factory=list, description="Company snapshot rows")
+    company_profile: CompanyProfileSection | None = Field(
+        default=None,
+        description="Business Intel detail copied from the company profile; None only if Business Intel is empty",
+    )
     data_notice: str | None = Field(
         default=None,
         description="Shown prominently when research data is thin/unverified; None when data is solid",

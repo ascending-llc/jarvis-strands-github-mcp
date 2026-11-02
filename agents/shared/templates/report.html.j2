@@ -96,6 +96,9 @@
   a { color: var(--aws-orange); text-decoration: none; }
   a:hover { text-decoration: underline; }
   ul.sources { padding-left: 1.3rem; font-size: 0.9rem; }
+  section h3 { color: var(--aws-dark-blue); margin: 1.4rem 0 0.4rem 0; font-size: 1.1rem; }
+  ul.profile { padding-left: 1.3rem; margin-top: 0.4rem; }
+  ul.profile li { margin-bottom: 0.5rem; }
 </style>
 </head>
 <body>
@@ -130,6 +133,41 @@
     </table>
 {% endif %}
   </section>
+
+{% set p = r.company_profile %}
+{% if p and (p.market_position or p.leadership or p.technology or p.recent_developments or p.challenges) %}
+  <section id="company-profile">
+    <h2>Company Profile</h2>
+{% if p.market_position %}
+    <h3>Market Position</h3>
+    <p class="prose">{{ p.market_position }}</p>
+{% endif %}
+{% if p.leadership %}
+    <h3>Leadership</h3>
+    <ul class="profile">
+{% for item in p.leadership %}      <li>{{ item }}</li>
+{% endfor %}    </ul>
+{% endif %}
+{% if p.technology %}
+    <h3>Technology &amp; Cloud Footprint</h3>
+    <ul class="profile">
+{% for item in p.technology %}      <li>{{ item }}</li>
+{% endfor %}    </ul>
+{% endif %}
+{% if p.recent_developments %}
+    <h3>Recent Developments</h3>
+    <ul class="profile">
+{% for item in p.recent_developments %}      <li>{{ item }}</li>
+{% endfor %}    </ul>
+{% endif %}
+{% if p.challenges %}
+    <h3>Potential Challenges</h3>
+    <ul class="profile">
+{% for item in p.challenges %}      <li>{{ item }}</li>
+{% endfor %}    </ul>
+{% endif %}
+  </section>
+{% endif %}
 
   <section id="opportunities">
     <h2>AWS Opportunities &amp; Case Studies</h2>
